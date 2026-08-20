@@ -1,0 +1,5 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001A
+  PACKAGE_NAME                   = MeiMeiDXEv3_SMU_Patch
+  PACKAGE_GUID                   = 6c5b7c53-8d21-4e42-9b62-7710e5d4a904
+  PACKAGE_VERSION                = 0.1
