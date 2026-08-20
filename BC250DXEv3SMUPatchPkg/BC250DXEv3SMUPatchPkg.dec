@@ -3,3 +3,10 @@
   PACKAGE_NAME                   = MeiMeiDXEv3_SMU_Patch
   PACKAGE_GUID                   = 6c5b7c53-8d21-4e42-9b62-7710e5d4a904
   PACKAGE_VERSION                = 0.1
+
+[Protocols]
+  ## Marker protocol produced by the BC-250 DXEv3 SMU secure-access unlock
+  #  driver (BC250-DXEv3-SMU-Unlock).  Vendored here so this package can list
+  #  the GUID in its [Depex] without referencing that package.  Keep this GUID
+  #  in sync with the SMU-Unlock driver's .dec declaration.
+  gMeiMeiDXEv3SmuUnlockProtocolGuid = { 0xA7C3D5E1, 0x94B2, 0x4C6D, { 0x8F, 0x1A, 0x3B, 0x5D, 0x7E, 0x9C, 0x2F, 0x68 } }
