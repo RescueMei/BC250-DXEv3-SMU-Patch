@@ -16,7 +16,7 @@ DRIVER_DIR="$REPO_DIR/BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 XTENSA_IMAGE="${XTENSA_IMAGE:-localhost/bc250-xtensa:latest}"
 NO_CONTAINER="${NO_CONTAINER:-0}"
-BASE=0x3b000
+BASE=0x3d000
 
 run_make() {
   if [[ "$NO_CONTAINER" == "1" ]]; then
@@ -39,7 +39,7 @@ run_make '
   [ -z "$undef" ] || { echo "  ERROR: undefined symbols:"; echo "$undef"; exit 1; }
   # FP-assist guard: the SMU Xtensa core has no windowed FP-assist helpers.
   bad=$(xtensa-esp32-elf-objdump -d smu_patch.elf | grep -cE "float|libgcc|__.*sf|__.*df" || true)
-  base=$((0x3b000))
+  base=$((0x3d000))
   off=$((0x$entry - base))
   printf "  smu_patch_entry=0x%s (off 0x%x)  bin=%s bytes  fp-assist-hits=%s\n" \
     "$entry" "$off" "$(wc -c < smu_patch.bin)" "$bad"

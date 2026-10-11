@@ -1,13 +1,21 @@
 /*
  * Scratch block for the metrics-patch entry glue: register save area + private
- * stack used while calling into C.  Placed just above the payload image
- * (payload base 0x3B000, scratch at 0x3B100), inside the documented free
- * region (0x3AE00+).
+ * stack used while calling into C.
+ *
+ * SMU-SRAM allocation (documented free region 0x3AE00..0x40000):
+ *   0x3AE00  Governor payload image        (see BC250-DXEv3-SMU-Governor)
+ *   0x3C000  Governor state
+ *   0x3C200  CU-Unlock payload image       (see BC250-DXEv3-CU-Unlock)
+ *   0x3C4C0  CU-Unlock save/stack/state
+ *   0x3D000  THIS payload image  (payload base 0x3D000, linked via linker.ld)
+ *   0x3D200  THIS scratch block  (save/stack; kept above the payload image)
+ * The scratch is deliberately NOT the payload base + a fixed small offset: the
+ * current image already exceeds 0x100 bytes, so it must sit above the image.
  */
 #ifndef BC250_SMU_PATCH_LAYOUT_H
 #define BC250_SMU_PATCH_LAYOUT_H
 
-#define SMU_PATCH_SCRATCH_ADDR   0x0003B100u
+#define SMU_PATCH_SCRATCH_ADDR   0x0003D200u
 #define SMU_PATCH_SAVE_OFF       0x0000u      /* a0..a7 */
 #define SMU_PATCH_STACK_OFF      0x0040u
 #define SMU_PATCH_STACK_SIZE     0x0100u

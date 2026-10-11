@@ -1,5 +1,13 @@
 # BC-250 SMU metrics 8-core patch
 
+> **Reference only (original prototype).** This directory documents the first,
+> hand-written byte-patch version of the metrics patch, which placed its block at
+> SMU SRAM **0x3B000**. That base **overlaps the SMU Governor payload**
+> (`0x3AE00..0x3B9B0`), so it is **not** the shipped layout. The shipping driver
+> compiles the payload from `payload/src/` and links it at **0x3D000** (scratch
+> `0x3D200`); see the top-level `README.md` for the current SMU SRAM allocation.
+> Kept here for provenance of the original RE/validation.
+
 Patches `smu_fw_robin3.bin` (BIOS 3.00 / Robin 3) so the SMU metrics table
 reports all 8 CPU cores (with the 8-core unlock active) and stamps a magic.
 

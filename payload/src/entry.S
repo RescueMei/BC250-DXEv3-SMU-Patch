@@ -9,7 +9,8 @@
  *
  * Manual (non-compilable) hooks, applied by the DXE driver:
  *   0x29A10  A0 06   ->  movi a13, 6      (cap the stock per-core loop at 6)
- *   0x29A1D  C6 7C 45 -> j 0x3B000        (jump to smu_patch_entry)
+ *   0x29A1D  j 0x3D000   (jump to smu_patch_entry; 3-byte encoding derived
+ *                         from the payload link base)
  * The second edit's encoding depends on the payload link base and is verified
  * by payload/build.sh (see SmuPatchMeta.h).
  */

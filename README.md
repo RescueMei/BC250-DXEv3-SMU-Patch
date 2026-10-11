@@ -11,12 +11,12 @@ The patch is **compiled Xtensa C** (like `BC250-DXEv3-SMU-Governor` /
 ```
 boot (DXE)
   └─ MeiMeiDXEv3_SMU_Patch
-       ├─ inject the compiled payload (SmuPatchPayload.h) at SMU SRAM 0x3B000
-       │    (verified all-zero first; the free region above the governor)
+       ├─ inject the compiled payload (SmuPatchPayload.h) at SMU SRAM 0x3D000
+       │    (verified all-zero first; a free slot above governor/CU-Unlock)
        └─ apply the two manual hooks (byte-granular, read-back verified):
             0x29A10  A0 06      movi a13,6   cap the stock per-core metrics
                                              loop (FUN_00029848) at 6 cores
-            0x29A1D  j 0x3B00C  jump into smu_patch_entry (replacing the
+            0x29A1D  j 0x3D00C  jump into smu_patch_entry (replacing the
                                              firmware's "l32r a7,0xCA54")
 ```
 
@@ -29,6 +29,24 @@ The cap and the jump are single-instruction edits into *existing* firmware code
 at fixed addresses; they have no compilable representation. Everything else
 (the tail computation, scaling, magic) is the compiled payload. Both hook sites
 are documented above and in `BC250DXEv3SMUPatchDxe.h`.
+
+## SMU SRAM allocation (shared with the other DXEv3 SMU drivers)
+The documented free region is `0x3AE00..0x40000`. To coexist, the three drivers
+each own a disjoint, spaced slice (checked with no overlaps):
+
+| Region                 | Occupant                                   |
+|------------------------|--------------------------------------------|
+| `0x3AE00..0x3B9B0`     | Governor payload image (2992 B)            |
+| `0x3C000..0x3C0C8`     | Governor state                             |
+| `0x3C200..0x3C470`     | CU-Unlock payload image (624 B)            |
+| `0x3C4C0..0x3C670`     | CU-Unlock save/stack/state                 |
+| `0x3D000..0x3D1BF`     | **this** payload image (447 B)             |
+| `0x3D200..0x3D340`     | **this** scratch (save/stack)              |
+
+The patch base is intentionally **not** `0x3B000`: the Governor payload reaches
+`0x3B9B0`, so `0x3B000` overlapped it (and the old scratch at `0x3B100`
+overlapped the patch's own 447-byte image). Both are fixed by the `0x3D000` /
+`0x3D200` placement.
 
 ## Resulting `SmuMetrics_t.Current` ABI (@0xCBC8)
 Stock fields unchanged (`CoreFreq` +0x00, `CorePower` +0x0C, `CoreTemp` +0x24,
@@ -56,7 +74,7 @@ payload/
   src/smu_patch_map.h         decoded SMU addresses
   src/smu_patch_layout.h      scratch/stack block + resume address
   src/sram.h                  SMU-SRAM access macro
-  linker.ld                   link base 0x3B000
+  linker.ld                   link base 0x3D000
   Makefile, build.sh
 BC250DXEv3SMUPatchPkg/        edk2 DXE driver (inject + hooks)
 BC250DXEv3SMUPatchDxe.h       manual-hook addresses (SMU_PATCH_CAP_ADDR/HOOK_ADDR)
