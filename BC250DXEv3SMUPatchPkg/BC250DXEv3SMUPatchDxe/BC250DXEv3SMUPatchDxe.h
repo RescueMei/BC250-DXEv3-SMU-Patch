@@ -83,6 +83,13 @@ typedef struct {
   UINT8   Data[3];
 } SMU_PATCH_SITE;
 
-#include "SMUPatchTable.h"
+
+//
+// Manual hook sites (the non-compilable steps applied by the driver, after
+// injecting the compiled payload).  Everything else lives in the payload
+// (payload/src, built to SmuPatchPayload.h).
+//
+#define SMU_PATCH_CAP_ADDR       0x00029A10U  // movi a13,6: cap the stock per-core metrics loop at 6
+#define SMU_PATCH_HOOK_ADDR      0x00029A1DU  // j smu_patch_entry (was "l32r a7, 0xCA54")
 
 #endif

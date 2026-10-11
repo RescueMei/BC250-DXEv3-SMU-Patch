@@ -3,4 +3,11 @@ Ref/
 .cache/
 
 # generated payload header
-BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe/SMUPatchTable.h
+BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe/SmuPatchPayload.h
+BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe/SmuPatchMeta.h
+payload/smu_patch.bin
+payload/SmuPatchPayload.h
+payload/SmuPatchMeta.h
+payload/*.elf
+payload/*.map
+payload/src/*.o

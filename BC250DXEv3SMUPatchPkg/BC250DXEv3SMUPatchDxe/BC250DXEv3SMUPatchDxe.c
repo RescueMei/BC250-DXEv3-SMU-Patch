@@ -10,6 +10,8 @@
 #include <Library/UefiLib.h>
 
 #include "BC250DXEv3SMUPatchDxe.h"
+#include "SmuPatchPayload.h"
+#include "SmuPatchMeta.h"
 
 //
 // This DXE driver applies the SMU firmware patch contained in
@@ -465,85 +467,140 @@ GetPatchEnabled (
 
   @retval EFI_SUCCESS  All sites were processed (verification failures are logged).
 **/
+/**
+  Compute the Xtensa `j` (J) instruction that jumps from Pc to Dst:
+  word = 0x6 | ((delta & 0x3FFFF) << 6), delta = Dst - Pc - 4.
+**/
+STATIC
+UINT32
+ComputeJump (
+  IN UINT32  Pc,
+  IN UINT32  Dst
+  )
+{
+  UINT32  Delta = (Dst - Pc - 4U) & 0x3FFFFU;
+  return (6U | (Delta << 6)) & 0x00FFFFFFU;
+}
+
+/**
+  Inject the compiled metrics-patch payload (SmuPatchPayload.h) into the
+  documented free SMU-SRAM region, after verifying it is all-zero.
+**/
+STATIC
+EFI_STATUS
+InjectPayload (
+  IN VOID  *DmaBuffer
+  )
+{
+  EFI_STATUS  Status;
+  UINTN       Index;
+  UINTN       Words;
+  UINT32      Expected;
+  UINT32      Value;
+
+  if (smu_patch_payload_len == 0 || (smu_patch_payload_len & 3U) != 0) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: bad payload length %u\n",
+      (UINT32)smu_patch_payload_len));
+    return EFI_BAD_BUFFER_SIZE;
+  }
+  Words = smu_patch_payload_len / sizeof (UINT32);
+
+  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: injecting %u bytes at 0x%05X\n",
+    (UINT32)smu_patch_payload_len, SMU_PATCH_PAYLOAD_BASE));
+
+  for (Index = 0; Index < Words; Index++) {
+    Status = SmuReadDword (SMU_PATCH_PAYLOAD_BASE + (UINT32)Index * 4U, DmaBuffer, &Expected);
+    if (EFI_ERROR (Status)) return Status;
+    if (Expected != 0) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: payload region not free @0x%05X = 0x%08X\n",
+        SMU_PATCH_PAYLOAD_BASE + (UINT32)Index * 4U, Expected));
+      return EFI_ABORTED;
+    }
+  }
+  for (Index = 0; Index < Words; Index++) {
+    CopyMem (&Value, smu_patch_payload + Index * 4, sizeof (Value));
+    Status = SmuWriteDword (SMU_PATCH_PAYLOAD_BASE + (UINT32)Index * 4U, Value);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: payload write failed at word %u\n", (UINT32)Index));
+      return Status;
+    }
+  }
+  return EFI_SUCCESS;
+}
+
+/**
+  Apply the two MANUAL (non-compilable) hooks that wire the compiled payload in:
+
+    0x29A10  A0 06      movi a13,6   (cap the stock per-core metrics loop at 6)
+    0x29A1D  <j entry>  jump to smu_patch_entry (at SMU_PATCH_PAYLOAD_BASE +
+                        SMU_PATCH_ENTRY_OFFSET), where the firmware's
+                        "l32r a7, 0xCA54" used to be.
+**/
+STATIC
+EFI_STATUS
+InstallHooks (
+  IN VOID  *DmaBuffer
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      DwordAddress;
+  UINT32      DwordValue;
+  UINT32      VerifyValue;
+  UINT32      Shift;
+  UINT32      Jump;
+  UINT32      Entry = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_ENTRY_OFFSET;
+  CONST UINT8 CapBytes[2] = { 0xA0, 0x06 };
+  UINT8       JumpBytes[3];
+  UINTN       Index;
+
+  Jump = ComputeJump (SMU_PATCH_HOOK_ADDR, Entry);
+  JumpBytes[0] = (UINT8)( Jump        & 0xFFU);
+  JumpBytes[1] = (UINT8)((Jump >>  8) & 0xFFU);
+  JumpBytes[2] = (UINT8)((Jump >> 16) & 0xFFU);
+
+  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: hooks cap@0x%05X jump@0x%05X->0x%05X (0x%08X)\n",
+    SMU_PATCH_CAP_ADDR, SMU_PATCH_HOOK_ADDR, Entry, Jump));
+
+  for (Index = 0; Index < 2; Index++) {
+    DwordAddress = SMU_PATCH_CAP_ADDR + (UINT32)Index;
+    Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
+    DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)CapBytes[Index] << Shift);
+    Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
+    if (((VerifyValue >> Shift) & 0xFFU) != CapBytes[Index]) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cap verify mismatch @0x%05X\n", SMU_PATCH_CAP_ADDR + (UINT32)Index));
+      return EFI_DEVICE_ERROR;
+    }
+  }
+  for (Index = 0; Index < 3; Index++) {
+    DwordAddress = SMU_PATCH_HOOK_ADDR + (UINT32)Index;
+    Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
+    DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)JumpBytes[Index] << Shift);
+    Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
+    if (((VerifyValue >> Shift) & 0xFFU) != JumpBytes[Index]) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: hook verify mismatch @0x%05X\n", SMU_PATCH_HOOK_ADDR + (UINT32)Index));
+      return EFI_DEVICE_ERROR;
+    }
+  }
+  return EFI_SUCCESS;
+}
+
+/**
+  Apply the metrics patch: inject the compiled payload, then the manual hooks.
+**/
 STATIC
 EFI_STATUS
 ApplySmuPatch (
   IN VOID  *DmaBuffer
   )
 {
-  UINTN       SiteIndex;
-  UINTN       ByteIndex;
-  UINT32      DwordAddress;
-  UINT32      DwordValue;
-  UINT32      VerifyValue;
-  UINT32      Shift;
-  UINTN       MismatchCount;
   EFI_STATUS  Status;
-
-  MismatchCount = 0;
-
-  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: applying %Lu patch sites\n",
-    (UINT64)SMU_PATCH_TABLE_SIZE));
-
-  for (SiteIndex = 0; SiteIndex < SMU_PATCH_TABLE_SIZE; SiteIndex++) {
-    for (ByteIndex = 0; ByteIndex < (UINTN)mSmuPatchSites[SiteIndex].Size; ByteIndex++) {
-      DwordAddress = mSmuPatchSites[SiteIndex].Address + (UINT32)ByteIndex;
-      Shift        = (DwordAddress & 3U) * 8U;
-      DwordAddress &= ~3U;
-
-      //
-      // Read the containing dword (unpatched state).
-      //
-      Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);
-      if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: read failed at 0x%05X\n", DwordAddress));
-        return Status;
-      }
-
-      DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: patch 0x%05X byte[%Lu] 0x%02X (dword 0x%08X)\n",
-        mSmuPatchSites[SiteIndex].Address + (UINT32)ByteIndex,
-        (UINT64)ByteIndex,
-        mSmuPatchSites[SiteIndex].Data[ByteIndex],
-        DwordValue));
-
-      //
-      // Replace the byte lane and write the full dword back through the
-      // gated write-through pointer.
-      //
-      DwordValue = (DwordValue & ~(0xFFU << Shift)) |
-                   ((UINT32)mSmuPatchSites[SiteIndex].Data[ByteIndex] << Shift);
-
-      Status = SmuWriteDword (DwordAddress, DwordValue);
-      if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: write failed at 0x%05X\n", DwordAddress));
-        return Status;
-      }
-
-      //
-      // Read-back verification.
-      //
-      Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);
-      if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: verify read failed at 0x%05X\n", DwordAddress));
-        return Status;
-      }
-
-      if (((VerifyValue >> Shift) & 0xFFU) != mSmuPatchSites[SiteIndex].Data[ByteIndex]) {
-        DEBUG ((DEBUG_ERROR,
-          "BC250DXEv3SMUPatchDxe: ** MISMATCH at 0x%05X want 0x%02X got 0x%02X (dword 0x%08X)\n",
-          mSmuPatchSites[SiteIndex].Address + (UINT32)ByteIndex,
-          mSmuPatchSites[SiteIndex].Data[ByteIndex],
-          (VerifyValue >> Shift) & 0xFFU,
-          VerifyValue));
-        MismatchCount++;
-      }
-    }
-  }
-
-  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: patch complete, %Lu mismatches\n",
-    (UINT64)MismatchCount));
-
-  return EFI_SUCCESS;
+  Status = InjectPayload (DmaBuffer);
+  if (EFI_ERROR (Status)) return Status;
+  return InstallHooks (DmaBuffer);
 }
 
 /**

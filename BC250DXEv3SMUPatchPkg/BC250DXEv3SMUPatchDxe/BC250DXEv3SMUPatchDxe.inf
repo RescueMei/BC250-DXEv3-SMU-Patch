@@ -9,6 +9,8 @@
 [Sources]
   BC250DXEv3SMUPatchDxe.c
   BC250DXEv3SMUPatchDxe.h
+  SmuPatchPayload.h
+  SmuPatchMeta.h
   SMUPatchTable.h
 
 [Packages]
