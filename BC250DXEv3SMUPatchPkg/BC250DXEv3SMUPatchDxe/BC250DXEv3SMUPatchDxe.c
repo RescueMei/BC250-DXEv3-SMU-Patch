@@ -561,16 +561,23 @@ InstallHooks (
   DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: hooks cap@0x%05X jump@0x%05X->0x%05X (0x%08X)\n",
     SMU_PATCH_CAP_ADDR, SMU_PATCH_HOOK_ADDR, Entry, Jump));
 
-  for (Index = 0; Index < 2; Index++) {
-    DwordAddress = SMU_PATCH_CAP_ADDR + (UINT32)Index;
-    Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
-    Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
-    DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)CapBytes[Index] << Shift);
-    Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
-    Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
-    if (((VerifyValue >> Shift) & 0xFFU) != CapBytes[Index]) {
-      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cap verify mismatch @0x%05X\n", SMU_PATCH_CAP_ADDR + (UINT32)Index));
-      return EFI_DEVICE_ERROR;
+  {
+    CONST UINT32 CapAddrs[2] = { SMU_PATCH_CAP_ADDR, SMU_PATCH_CAP2_ADDR };
+    UINTN        CapIdx;
+
+    for (CapIdx = 0; CapIdx < 2; CapIdx++) {
+      for (Index = 0; Index < 2; Index++) {
+        DwordAddress = CapAddrs[CapIdx] + (UINT32)Index;
+        Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
+        Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
+        DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)CapBytes[Index] << Shift);
+        Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
+        Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
+        if (((VerifyValue >> Shift) & 0xFFU) != CapBytes[Index]) {
+          DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cap verify mismatch @0x%05X\n", CapAddrs[CapIdx] + (UINT32)Index));
+          return EFI_DEVICE_ERROR;
+        }
+      }
     }
   }
   for (Index = 0; Index < 3; Index++) {

@@ -1,21 +1,20 @@
 /*
  * BC-250 SMU metrics 8-core patch - native Xtensa payload.
  *
- * The DXE driver hooks the firmware GPU-metrics fill (FUN_00029848) right after
- * its per-core loop and jumps here.  This routine:
+ * The DXE driver hooks the firmware GPU-metrics fill right after its per-core
+ * loop and jumps here.  Both stock fill loops (Current FUN_00029aec and
+ * Average FUN_00029848) are capped at 6 cores by manual hooks in the DXE
+ * driver, so the 6-wide stock arrays are filled correctly with no overrun.
  *
+ * This routine then:
  *   1. stamps Spare (Current + 0x72) with the magic 0x67, and
  *   2. emits the extra CPU cores (indices 6..count-1, i.e. the cores the
- *      8-core unlock enables) into a dedicated free-SRAM block
- *      (SMU_EXTRA_BASE), NOT the metrics table: the SMU's real metrics block
- *      (0xCB54..0xCC48) is followed immediately by a live device descriptor
- *      (s_AMD_BC_250 @0xCC48), its core map (0xCC90) and a pointer table
- *      (0xCCA8), so appending to Current would corrupt firmware data.
+ *      8-core unlock enables) into the expanded block immediately after
+ *      Spare, mirroring the stock per-core layout (+0x74/+0x80/+0x98/+0xAC),
+ *      so the stock SmuMetricsTable_t is output unchanged and the extra cores
+ *      follow it.
  *
- * The stock fill itself is capped at 6 cores by a manual hook in the DXE
- * driver (see SMU_STOCK_CORES) so the 6-entry arrays are not overrun.
- *
- * Integer/float arithmetic mirrors FUN_00029848: each source field is a float
+ * Integer/float arithmetic mirrors FUN_00029aec: each source field is a float
  * scaled by a per-domain factor read from SRAM, then truncated to an integer.
  */
 #include "sram.h"
@@ -29,7 +28,7 @@ void smu_patch_main(void)
     unsigned extra;
     unsigned i;
 
-    /* Magic marker: proves the patch ran. */
+    /* Magic marker: proves the patch ran and gates the expanded block. */
     REG(unsigned short, SMU_METRICS_BASE + SMU_SPARE_OFF) = SMU_SPARE_MAGIC;
 
     if (count <= SMU_STOCK_CORES) {
@@ -40,7 +39,6 @@ void smu_patch_main(void)
         extra = SMU_MAX_EXTRA_CORES;
     }
 
-    REG(unsigned, SMU_EXTRA_BASE) = SMU_EXTRA_MAGIC;
     for (i = 0; i < extra; i++) {
         unsigned idx  = SMU_STOCK_CORES + i;
         unsigned slot = REG(unsigned char, SMU_CORE_MAP + idx);
@@ -49,9 +47,9 @@ void smu_patch_main(void)
         unsigned p    = (unsigned)(REG(float, src + SMU_SRC_POWER_OFF) * sf);
         unsigned t    = (unsigned)(REG(float, src + SMU_SRC_TEMP_OFF)  * st);
         unsigned r    = (unsigned)(REG(float, src + SMU_SRC_RESID_OFF) * st);
-        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_FREQ_OFF  + i * 2u) = (unsigned short)f;
-        REG(unsigned,       SMU_EXTRA_BASE + SMU_EXTRA_POWER_OFF + i * 4u) = p;
-        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_TEMP_OFF  + i * 2u) = (unsigned short)t;
-        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_RESID_OFF + i * 2u) = (unsigned short)r;
+        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_FREQ_OFF  + i * 2u) = (unsigned short)f;
+        REG(unsigned,       SMU_METRICS_BASE + SMU_TAIL_POWER_OFF + i * 4u) = p;
+        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_TEMP_OFF  + i * 2u) = (unsigned short)t;
+        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_RESID_OFF + i * 2u) = (unsigned short)r;
     }
 }

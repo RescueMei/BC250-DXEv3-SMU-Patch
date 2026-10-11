@@ -89,7 +89,16 @@ typedef struct {
 // injecting the compiled payload).  Everything else lives in the payload
 // (payload/src, built to SmuPatchPayload.h).
 //
-#define SMU_PATCH_CAP_ADDR       0x00029A10U  // movi a13,6: cap the stock per-core metrics loop at 6
+// Both stock metrics fill loops are count-bounded and write the 6-wide arrays,
+// so with 8 cores each overruns into the following fields.  Cap both at 6:
+//   0x29A0F/0x29A10  Average fill (FUN_00029848) loop bound -> movi a13,6
+//   0x29BE5/0x29BE6  Current fill (FUN_00029aec) loop bound -> movi a13,6
+//      (the Current overflow is what clobbers Current.GfxclkFrequency via
+//       C0Residency[6] at +0x38+12 = +0x44)
+// and jump into the payload so it emits cores 6/7 after Spare.
+//
+#define SMU_PATCH_CAP_ADDR       0x00029A10U  // movi a13,6: cap the Average fill loop
+#define SMU_PATCH_CAP2_ADDR      0x00029BE6U  // movi a13,6: cap the Current fill loop
 #define SMU_PATCH_HOOK_ADDR      0x00029A1DU  // j smu_patch_entry (was "l32r a7, 0xCA54")
 
 #endif
