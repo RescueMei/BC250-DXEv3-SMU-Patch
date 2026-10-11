@@ -23,6 +23,8 @@ smu_patch.elf: $(OBJS) linker.ld
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
 smu_patch.bin: smu_patch.elf
 	$(OBJCOPY) -O binary $< $@
+	@sz=$$(wc -c < $@); pad=$$(( (4 - (sz % 4)) % 4 )); \
+	 if [ $$pad -ne 0 ]; then dd if=/dev/zero bs=1 count=$$pad >> $@ 2>/dev/null; fi
 	@printf 'smu_patch.bin size: '; wc -c < $@
 SmuPatchPayload.h: smu_patch.bin
 	xxd -i -n smu_patch_payload $< > $@
