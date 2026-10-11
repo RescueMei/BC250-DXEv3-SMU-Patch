@@ -11,3 +11,4 @@ payload/SmuPatchMeta.h
 payload/*.elf
 payload/*.map
 payload/src/*.o
+BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe/SMUPatchTable.h
