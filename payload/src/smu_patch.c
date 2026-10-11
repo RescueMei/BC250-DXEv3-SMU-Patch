@@ -6,7 +6,11 @@
  *
  *   1. stamps Spare (Current + 0x72) with the magic 0x67, and
  *   2. emits the extra CPU cores (indices 6..count-1, i.e. the cores the
- *      8-core unlock enables) into the table tail, mirroring the stock layout.
+ *      8-core unlock enables) into a dedicated free-SRAM block
+ *      (SMU_EXTRA_BASE), NOT the metrics table: the SMU's real metrics block
+ *      (0xCB54..0xCC48) is followed immediately by a live device descriptor
+ *      (s_AMD_BC_250 @0xCC48), its core map (0xCC90) and a pointer table
+ *      (0xCCA8), so appending to Current would corrupt firmware data.
  *
  * The stock fill itself is capped at 6 cores by a manual hook in the DXE
  * driver (see SMU_STOCK_CORES) so the 6-entry arrays are not overrun.
@@ -36,6 +40,7 @@ void smu_patch_main(void)
         extra = SMU_MAX_EXTRA_CORES;
     }
 
+    REG(unsigned, SMU_EXTRA_BASE) = SMU_EXTRA_MAGIC;
     for (i = 0; i < extra; i++) {
         unsigned idx  = SMU_STOCK_CORES + i;
         unsigned slot = REG(unsigned char, SMU_CORE_MAP + idx);
@@ -44,9 +49,9 @@ void smu_patch_main(void)
         unsigned p    = (unsigned)(REG(float, src + SMU_SRC_POWER_OFF) * sf);
         unsigned t    = (unsigned)(REG(float, src + SMU_SRC_TEMP_OFF)  * st);
         unsigned r    = (unsigned)(REG(float, src + SMU_SRC_RESID_OFF) * st);
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_FREQ_OFF  + i * 2u) = (unsigned short)f;
-        REG(unsigned,       SMU_METRICS_BASE + SMU_TAIL_POWER_OFF + i * 4u) = p;
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_TEMP_OFF  + i * 2u) = (unsigned short)t;
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_RESID_OFF + i * 2u) = (unsigned short)r;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_FREQ_OFF  + i * 2u) = (unsigned short)f;
+        REG(unsigned,       SMU_EXTRA_BASE + SMU_EXTRA_POWER_OFF + i * 4u) = p;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_TEMP_OFF  + i * 2u) = (unsigned short)t;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_RESID_OFF + i * 2u) = (unsigned short)r;
     }
 }
