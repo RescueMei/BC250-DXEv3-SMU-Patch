@@ -10,13 +10,15 @@ CFLAGS  = -mlongcalls -mtext-section-literals -nostdlib -ffreestanding \
           -fno-builtin -fno-stack-protector -Os -Wall -Wextra
 LDFLAGS = -nostdlib -T linker.ld -Wl,--gc-sections -Wl,-Map=smu_patch.map
 
-OBJS = src/entry.o src/smu_patch.o
+OBJS = src/entry.o src/smu_patch.o src/clamp.o
 
 all: smu_patch.bin SmuPatchPayload.h
 
 src/entry.o: src/entry.S src/smu_patch_layout.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 src/smu_patch.o: src/smu_patch.c src/sram.h src/smu_patch_map.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+src/clamp.o: src/clamp.S src/smu_patch_map.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 smu_patch.elf: $(OBJS) linker.ld

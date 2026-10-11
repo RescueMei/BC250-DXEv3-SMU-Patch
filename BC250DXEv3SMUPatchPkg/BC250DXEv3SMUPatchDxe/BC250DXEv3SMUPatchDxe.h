@@ -87,18 +87,16 @@ typedef struct {
 //
 // Manual hook sites (the non-compilable steps applied by the driver, after
 // injecting the compiled payload).  Everything else lives in the payload
-// (payload/src, built to SmuPatchPayload.h).
+// (payload/src, built to SmuPatchPayload.h).  Each stock fill loads its
+// per-core loop bound with a 3-byte "l8ui a13,<cfg>,26"; the driver replaces
+// each with a 3-byte "j <helper>" that sets a13 = min(count, 6) and resumes.
 //
-// Both stock metrics fill loops are count-bounded and write the 6-wide arrays,
-// so with 8 cores each overruns into the following fields.  Cap both at 6:
-//   0x29A0F/0x29A10  Average fill (FUN_00029848) loop bound -> movi a13,6
-//   0x29BE5/0x29BE6  Current fill (FUN_00029aec) loop bound -> movi a13,6
-//      (the Current overflow is what clobbers Current.GfxclkFrequency via
-//       C0Residency[6] at +0x38+12 = +0x44)
-// and jump into the payload so it emits cores 6/7 after Spare.
+//   0x29BE5  j smu_clamp_current   (Current fill FUN_00029aec, resume 0x29BE8)
+//   0x29A0F  j smu_clamp_average   (Average fill FUN_00029848, resume 0x29A12)
+//   0x29A1D  j smu_patch_entry     (emit tail; replaces "l32r a7, 0xCA54")
 //
-#define SMU_PATCH_CAP_ADDR       0x00029A10U  // movi a13,6: cap the Average fill loop
-#define SMU_PATCH_CAP2_ADDR      0x00029BE6U  // movi a13,6: cap the Current fill loop
-#define SMU_PATCH_HOOK_ADDR      0x00029A1DU  // j smu_patch_entry (was "l32r a7, 0xCA54")
+#define SMU_PATCH_CLAMP_CURRENT_ADDR 0x00029BE5U
+#define SMU_PATCH_CLAMP_AVERAGE_ADDR 0x00029A0FU
+#define SMU_PATCH_HOOK_ADDR          0x00029A1DU
 
 #endif

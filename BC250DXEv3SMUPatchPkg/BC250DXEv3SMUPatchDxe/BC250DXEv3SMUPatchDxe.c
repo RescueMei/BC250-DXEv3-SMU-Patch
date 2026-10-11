@@ -529,12 +529,50 @@ InjectPayload (
 }
 
 /**
-  Apply the two MANUAL (non-compilable) hooks that wire the compiled payload in:
+  Write a 3-byte Xtensa `j` at Site targeting Target (byte-granular RMW).
+**/
+STATIC
+EFI_STATUS
+InstallJump3 (
+  IN UINT32  Site,
+  IN UINT32  Target,
+  IN VOID    *DmaBuffer
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      DwordAddress;
+  UINT32      DwordValue;
+  UINT32      VerifyValue;
+  UINT32      Shift;
+  UINT32      Jump = ComputeJump (Site, Target);
+  UINT8       Bytes[3];
+  UINTN       Index;
 
-    0x29A10  A0 06      movi a13,6   (cap the stock per-core metrics loop at 6)
-    0x29A1D  <j entry>  jump to smu_patch_entry (at SMU_PATCH_PAYLOAD_BASE +
-                        SMU_PATCH_ENTRY_OFFSET), where the firmware's
-                        "l32r a7, 0xCA54" used to be.
+  Bytes[0] = (UINT8)( Jump        & 0xFFU);
+  Bytes[1] = (UINT8)((Jump >>  8) & 0xFFU);
+  Bytes[2] = (UINT8)((Jump >> 16) & 0xFFU);
+
+  for (Index = 0; Index < 3; Index++) {
+    DwordAddress = Site + (UINT32)Index;
+    Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
+    DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)Bytes[Index] << Shift);
+    Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
+    Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
+    if (((VerifyValue >> Shift) & 0xFFU) != Bytes[Index]) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: jump verify mismatch @0x%05X\n", Site + (UINT32)Index));
+      return EFI_DEVICE_ERROR;
+    }
+  }
+  return EFI_SUCCESS;
+}
+
+/**
+  Apply the three MANUAL (non-compilable) hooks that wire the compiled payload:
+
+    0x29BE5  j smu_clamp_current   (Current fill loop bound -> min(count, 6))
+    0x29A0F  j smu_clamp_average   (Average fill loop bound -> min(count, 6))
+    0x29A1D  j smu_patch_entry     (emit the fixed-size tail)
 **/
 STATIC
 EFI_STATUS
@@ -543,55 +581,22 @@ InstallHooks (
   )
 {
   EFI_STATUS  Status;
-  UINT32      DwordAddress;
-  UINT32      DwordValue;
-  UINT32      VerifyValue;
-  UINT32      Shift;
-  UINT32      Jump;
   UINT32      Entry = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_ENTRY_OFFSET;
-  CONST UINT8 CapBytes[2] = { 0xA0, 0x06 };
-  UINT8       JumpBytes[3];
-  UINTN       Index;
 
-  Jump = ComputeJump (SMU_PATCH_HOOK_ADDR, Entry);
-  JumpBytes[0] = (UINT8)( Jump        & 0xFFU);
-  JumpBytes[1] = (UINT8)((Jump >>  8) & 0xFFU);
-  JumpBytes[2] = (UINT8)((Jump >> 16) & 0xFFU);
+  DEBUG ((DEBUG_INFO,
+    "BC250DXEv3SMUPatchDxe: hooks clamp_cur@0x%05X->0x%05X clamp_avg@0x%05X->0x%05X entry@0x%05X->0x%05X\n",
+    SMU_PATCH_CLAMP_CURRENT_ADDR, SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_CURRENT_OFFSET,
+    SMU_PATCH_CLAMP_AVERAGE_ADDR, SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_AVERAGE_OFFSET,
+    SMU_PATCH_HOOK_ADDR, Entry));
 
-  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: hooks cap@0x%05X jump@0x%05X->0x%05X (0x%08X)\n",
-    SMU_PATCH_CAP_ADDR, SMU_PATCH_HOOK_ADDR, Entry, Jump));
-
-  {
-    CONST UINT32 CapAddrs[2] = { SMU_PATCH_CAP_ADDR, SMU_PATCH_CAP2_ADDR };
-    UINTN        CapIdx;
-
-    for (CapIdx = 0; CapIdx < 2; CapIdx++) {
-      for (Index = 0; Index < 2; Index++) {
-        DwordAddress = CapAddrs[CapIdx] + (UINT32)Index;
-        Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
-        Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
-        DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)CapBytes[Index] << Shift);
-        Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
-        Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
-        if (((VerifyValue >> Shift) & 0xFFU) != CapBytes[Index]) {
-          DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cap verify mismatch @0x%05X\n", CapAddrs[CapIdx] + (UINT32)Index));
-          return EFI_DEVICE_ERROR;
-        }
-      }
-    }
-  }
-  for (Index = 0; Index < 3; Index++) {
-    DwordAddress = SMU_PATCH_HOOK_ADDR + (UINT32)Index;
-    Shift = (DwordAddress & 3U) * 8U; DwordAddress &= ~3U;
-    Status = SmuReadDword (DwordAddress, DmaBuffer, &DwordValue);   if (EFI_ERROR (Status)) return Status;
-    DwordValue = (DwordValue & ~(0xFFU << Shift)) | ((UINT32)JumpBytes[Index] << Shift);
-    Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
-    Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
-    if (((VerifyValue >> Shift) & 0xFFU) != JumpBytes[Index]) {
-      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: hook verify mismatch @0x%05X\n", SMU_PATCH_HOOK_ADDR + (UINT32)Index));
-      return EFI_DEVICE_ERROR;
-    }
-  }
+  Status = InstallJump3 (SMU_PATCH_CLAMP_CURRENT_ADDR,
+                         SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_CURRENT_OFFSET, DmaBuffer);
+  if (EFI_ERROR (Status)) return Status;
+  Status = InstallJump3 (SMU_PATCH_CLAMP_AVERAGE_ADDR,
+                         SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_AVERAGE_OFFSET, DmaBuffer);
+  if (EFI_ERROR (Status)) return Status;
+  Status = InstallJump3 (SMU_PATCH_HOOK_ADDR, Entry, DmaBuffer);
+  if (EFI_ERROR (Status)) return Status;
   return EFI_SUCCESS;
 }
 

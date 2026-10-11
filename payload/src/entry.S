@@ -37,11 +37,44 @@ smu_patch_entry:
     s32i    a5, a8, 20
     s32i    a6, a8, 24
     s32i    a7, a8, 28
+    /* the hooked fill runs with live floats in f0-f11; save all of them */
+    ssi     f0,  a8, 32
+    ssi     f1,  a8, 36
+    ssi     f2,  a8, 40
+    ssi     f3,  a8, 44
+    ssi     f4,  a8, 48
+    ssi     f5,  a8, 52
+    ssi     f6,  a8, 56
+    ssi     f7,  a8, 60
+    ssi     f8,  a8, 64
+    ssi     f9,  a8, 68
+    ssi     f10, a8, 72
+    ssi     f11, a8, 76
+    ssi     f12, a8, 80
+    ssi     f13, a8, 84
+    ssi     f14, a8, 88
+    ssi     f15, a8, 92
 
     l32r    a1, .Lstack
     call8   smu_patch_main
 
     l32r    a8, .Lsave
+    lsi     f0,  a8, 32
+    lsi     f1,  a8, 36
+    lsi     f2,  a8, 40
+    lsi     f3,  a8, 44
+    lsi     f4,  a8, 48
+    lsi     f5,  a8, 52
+    lsi     f6,  a8, 56
+    lsi     f7,  a8, 60
+    lsi     f8,  a8, 64
+    lsi     f9,  a8, 68
+    lsi     f10, a8, 72
+    lsi     f11, a8, 76
+    lsi     f12, a8, 80
+    lsi     f13, a8, 84
+    lsi     f14, a8, 88
+    lsi     f15, a8, 92
     l32i    a0, a8, 0
     l32i    a1, a8, 4
     l32i    a2, a8, 8
