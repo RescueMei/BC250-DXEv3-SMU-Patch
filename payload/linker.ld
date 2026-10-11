@@ -11,7 +11,7 @@ ENTRY(smu_patch_entry)
 
 SECTIONS
 {
-    . = 0x3D000;
+    . = 0x3AE00;
 
     .text : {
         *(.literal)

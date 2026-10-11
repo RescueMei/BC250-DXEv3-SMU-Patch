@@ -15,7 +15,7 @@
 #ifndef BC250_SMU_PATCH_LAYOUT_H
 #define BC250_SMU_PATCH_LAYOUT_H
 
-#define SMU_PATCH_SCRATCH_ADDR   0x0003D400u
+#define SMU_PATCH_SCRATCH_ADDR   0x0003B200u
 #define SMU_PATCH_SAVE_OFF       0x0000u      /* a0..a7 */
 #define SMU_PATCH_FSAVE_OFF      0x0020u      /* f0..f15 (the fill lives in f0-f11) */
 #define SMU_PATCH_STACK_OFF      0x0060u

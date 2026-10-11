@@ -39,7 +39,7 @@
  * free SMU SRAM (NOT contiguous with SmuMetrics_t: 0xCC48.. is live SMU data
  * that cannot be repurposed).  A consumer reads it at this fixed address,
  * gated by Current.Spare == SMU_SPARE_MAGIC. */
-#define SMU_TAIL_BASE         0x0003F000u
+#define SMU_TAIL_BASE         0x0003B480u
 #define SMU_TAIL_SIZE         0x0040u
 
 #define SMU_TAIL_MAGIC        0x38434F52u   /* "ROC8" */
