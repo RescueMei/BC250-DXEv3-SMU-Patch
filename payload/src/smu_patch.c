@@ -47,9 +47,9 @@ void smu_patch_main(void)
         unsigned p    = (unsigned)(REG(float, src + SMU_SRC_POWER_OFF) * sf);
         unsigned t    = (unsigned)(REG(float, src + SMU_SRC_TEMP_OFF)  * st);
         unsigned r    = (unsigned)(REG(float, src + SMU_SRC_RESID_OFF) * st);
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_FREQ_OFF  + i * 2u) = (unsigned short)f;
-        REG(unsigned,       SMU_METRICS_BASE + SMU_TAIL_POWER_OFF + i * 4u) = p;
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_TEMP_OFF  + i * 2u) = (unsigned short)t;
-        REG(unsigned short, SMU_METRICS_BASE + SMU_TAIL_RESID_OFF + i * 2u) = (unsigned short)r;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_FREQ_OFF  + i * 2u) = (unsigned short)f;
+        REG(unsigned,       SMU_EXTRA_BASE + SMU_EXTRA_POWER_OFF + i * 4u) = p;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_TEMP_OFF  + i * 2u) = (unsigned short)t;
+        REG(unsigned short, SMU_EXTRA_BASE + SMU_EXTRA_RESID_OFF + i * 2u) = (unsigned short)r;
     }
 }

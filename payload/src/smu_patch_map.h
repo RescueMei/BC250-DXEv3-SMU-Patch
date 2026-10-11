@@ -36,11 +36,14 @@
 #define SMU_STOCK_CORES       6u
 #define SMU_MAX_EXTRA_CORES   2u
 
-/* Expanded block right after Current.Spare (stock per-core offsets + 0x74). */
-#define SMU_TAIL_FREQ_OFF     0x0074u       /* u16 x2, MHz */
-#define SMU_TAIL_POWER_OFF    0x0080u       /* u32 x2, mW */
-#define SMU_TAIL_TEMP_OFF     0x0098u       /* u16 x2, centi-C */
-#define SMU_TAIL_RESID_OFF    0x00ACu       /* u16 x2 */
+/* Dedicated expanded block immediately after the whole SmuMetrics_t:
+ * sizeof(SmuMetrics_t) = 2 * sizeof(SmuMetricsTable_t)(0x74) + 3 u32 (times)
+ * = 0xF4, so the block starts at SMU_METRICS_BASE + 0xF4. */
+#define SMU_EXTRA_BASE        (SMU_METRICS_BASE + 0x00F4u)
+#define SMU_EXTRA_FREQ_OFF    0x0000u       /* u16 x2, MHz */
+#define SMU_EXTRA_POWER_OFF   0x0004u       /* u32 x2, mW */
+#define SMU_EXTRA_TEMP_OFF    0x000Cu       /* u16 x2, centi-C */
+#define SMU_EXTRA_RESID_OFF   0x0010u       /* u16 x2 */
 
 /* Per-core source field offsets. */
 #define SMU_SRC_FREQ_OFF      0x0140u
