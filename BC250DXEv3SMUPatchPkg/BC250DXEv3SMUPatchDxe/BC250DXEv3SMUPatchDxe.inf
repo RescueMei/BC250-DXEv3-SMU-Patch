@@ -9,6 +9,7 @@
 [Sources]
   BC250DXEv3SMUPatchDxe.c
   BC250DXEv3SMUPatchDxe.h
+  SMUPatchTable.h
 
 [Packages]
   MdePkg/MdePkg.dec

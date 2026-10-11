@@ -1,3 +1,6 @@
 Build/Output/
 Ref/
 .cache/
+
+# generated payload header
+BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchDxe/SMUPatchTable.h
