@@ -29,7 +29,14 @@
 #ifndef BC250_SMU_PATCH_MAP_H
 #define BC250_SMU_PATCH_MAP_H
 
-#define SMU_METRICS_BASE      0x0000CB54u   /* SmuMetricsTable_t.Current */
+#define SMU_METRICS_BASE      0x0000CB54u
+/* Relocation: the Current/Average fills load their base from the single literal
+ * at image 0x17F24; the deploy patches it to this free region and extends the
+ * Current fill's transfer size, so the extra cores live at RELOC+0xF4 and are
+ * carried by the transfer with no late hook. */
+#define SMU_METRICS_RELOC     0x0003B500u
+#define SMU_RELOC_SPARE_OFF   0x0072u
+#define SMU_RELOC_EXTRA_OFF   0x00F4u   /* SmuMetricsTable_t.Current */
 #define SMU_SPARE_OFF         0x0072u
 #define SMU_SPARE_MAGIC       0x67u
 #define SMU_STOCK_CORES       6u
@@ -51,9 +58,21 @@
 #define SMU_TAIL_COUNT_OFF    0x0006u       /* u16 */
 #define SMU_TAIL_FLAGS_OFF    0x0008u       /* u16 */
 #define SMU_TAIL_FREQ_OFF     0x000Cu       /* u16 x2, MHz */
-#define SMU_TAIL_POWER_OFF    0x0010u       /* u32 x2, mW */
-#define SMU_TAIL_TEMP_OFF     0x0018u       /* u16 x2, centi-C */
-#define SMU_TAIL_RESID_OFF    0x001Cu       /* u16 x2 */
+#define SMU_TAIL_POWER_OFF    0x0010u       /* u16 x2, 100mW */
+#define SMU_TAIL_TEMP_OFF     0x0014u       /* u16 x2, centi-C */
+#define SMU_TAIL_RESID_OFF    0x0018u       /* u16 x2 */
+
+/* SMU table array (base 0xCA28, 36-byte selectors).  Register a free id (2)
+ * as a transferable table whose copier copies the fixed tail.  Layout:
+ *   handler@ (0xCA28 + 36*id) + 0x34
+ *   flag   @ (0xCA28 + 36*id) + 0x40
+ *   desc   @ (0xCA6C + 36*id) { +0 dst_lo, +4 dst_hi, +11 status }
+ * Driver-table descriptor (dst set by Q0 SetDriverTableDramAddr) is 0xCA38. */
+#define SMU_TBL_EXT_ID        3u
+#define SMU_TBL_HANDLER(id)   (0xCA5Cu + 36u * (id))
+#define SMU_TBL_FLAG(id)      (0xCA68u + 36u * (id))
+#define SMU_TBL_DESC(id)      (0xCA6Cu + 36u * (id))
+#define SMU_DRVTABLE_DESC     0xCA38u
 
 /* Per-core source records (stride 0x178) and the core -> slot byte map. */
 #define SMU_METRICS_SRC       0x0000FAC4u

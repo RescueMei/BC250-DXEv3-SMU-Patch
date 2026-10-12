@@ -17,6 +17,8 @@ SECTIONS
         *(.literal)
         *(.literal.*)
         KEEP(*(.text.smu_patch_entry))
+        KEEP(*(.text.smu_spare_entry))
+        KEEP(*(.text.smu_extra_entry))
         KEEP(*(.text.smu_clamp_current))
         KEEP(*(.text.smu_clamp_average))
         *(.text)
