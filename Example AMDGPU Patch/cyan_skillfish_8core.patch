@@ -1,0 +1,83 @@
+--- /root/build/linux-pristine/linux-6.19.10/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c	2026-03-25 10:13:32.000000000 +0000
++++ /usr/src/kernels/6.19.10-300.fc44.x86_64/drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c	2026-10-13 12:57:26.688506441 +0000
+@@ -34,6 +34,23 @@
+ #include "soc15_common.h"
+ 
+ /*
++ * BC-250 8-core metrics expansion.
++ *
++ * The SMU firmware patch (BC250-DXEv3-SMU-Patch) caps both metrics fill loops
++ * at 6 and, when the 8-core unlock is active, stamps Current.Spare with this
++ * magic and writes the extra cores 6/7 into the trailing (driver-unused)
++ * SampleStartTime/SampleStopTime/Accnt bytes of the transferred SmuMetrics_t.
++ * A stock SMU leaves Spare != magic, so the extra bytes are only parsed when
++ * the magic is present.
++ */
++#define CYAN_SKILLFISH_METRICS_MAGIC 0x67
++struct cyan_skillfish_metrics_extra {
++	u16 CoreFrequency2[2];
++	u16 CorePower2[2];
++	u16 CoreTemperature2[2];
++};
++
++/*
+  * DO NOT use these for err/warn/info/debug messages.
+  * Use dev_err, dev_warn, dev_info and dev_dbg instead.
+  * They are more MGPU friendly.
+@@ -82,6 +99,7 @@
+ 
+ static struct cmn2asic_mapping cyan_skillfish_table_map[SMU_TABLE_COUNT] = {
+ 	TAB_MAP_VALID(SMU_METRICS),
++	TAB_MAP_VALID(SMU_METRICS_EXT),
+ };
+ 
+ static int cyan_skillfish_tables_init(struct smu_context *smu)
+@@ -93,6 +111,10 @@
+ 				sizeof(SmuMetrics_t),
+ 				PAGE_SIZE,
+ 				AMDGPU_GEM_DOMAIN_VRAM);
++	SMU_TABLE_INIT(tables, SMU_TABLE_SMU_METRICS_EXT,
++				0x40,
++				PAGE_SIZE,
++				AMDGPU_GEM_DOMAIN_VRAM);
+ 
+ 	smu_table->metrics_table = kzalloc(sizeof(SmuMetrics_t), GFP_KERNEL);
+ 	if (!smu_table->metrics_table)
+@@ -423,6 +445,17 @@
+ 		gpu_metrics->current_coreclk[i] = metrics.Current.CoreFrequency[i];
+ 	}
+ 
++	if (metrics.Current.Spare == CYAN_SKILLFISH_METRICS_MAGIC) {
++		const struct cyan_skillfish_metrics_extra *x =
++			(const struct cyan_skillfish_metrics_extra *)
++			((const u8 *)&metrics + 0xE8);
++		for (i = 0; i < 2; i++) {
++			gpu_metrics->current_coreclk[6 + i] = x->CoreFrequency2[i];
++			gpu_metrics->average_core_power[6 + i] = x->CorePower2[i];
++			gpu_metrics->temperature_core[6 + i] = x->CoreTemperature2[i];
++		}
++	}
++
+ 	for (i = 0; i < 2; i++) {
+ 		gpu_metrics->temperature_l3[i] = metrics.Current.L3Temperature[i];
+ 		gpu_metrics->current_l3clk[i] = metrics.Current.L3Frequency[i];
+--- /root/build/linux-pristine/linux-6.19.10/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h	2026-03-25 10:13:32.000000000 +0000
++++ /usr/src/kernels/6.19.10-300.fc44.x86_64/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h	2026-10-13 12:57:26.688506441 +0000
+@@ -34,6 +34,7 @@
+ #define TABLE_DPMCLOCKS          4 // Called by Driver; defined here, but not used, for backward compatible
+ #define TABLE_MOMENTARY_PM       5 // Called by Tools; defined here, but not used, for backward compatible
+ #define TABLE_SMU_METRICS        6 // Called by Driver
++#define TABLE_SMU_METRICS_EXT    3 // BC-250: extra-core table (free id)
+ #define TABLE_COUNT              7
+ 
+ typedef struct SmuMetricsTable_t {
+--- /root/build/linux-pristine/linux-6.19.10/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h	2026-03-25 10:13:32.000000000 +0000
++++ /usr/src/kernels/6.19.10-300.fc44.x86_64/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h	2026-10-13 12:57:26.688506441 +0000
+@@ -335,6 +335,7 @@
+ 	SMU_TABLE_GPUBOARD_TEMP_METRICS,
+ 	SMU_TABLE_BASEBOARD_TEMP_METRICS,
+ 	SMU_TABLE_PMFW_SYSTEM_METRICS,
++	SMU_TABLE_SMU_METRICS_EXT,
+ 	SMU_TABLE_COUNT,
+ };
+ 
