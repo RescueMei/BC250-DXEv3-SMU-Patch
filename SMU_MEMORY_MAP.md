@@ -14,7 +14,7 @@ is disjoint (with headroom), and nothing is placed below `0x3AE00` or in
 
 [2] CU-Unlock (40 CU)                       SECOND
     0x3C000  payload image      (624 B -> 0x3C270)
-    0x3C280  save / stack / state (0x180 -> 0x3C400)    state = base + 0x140
+    0x3C400  save / stack / state (0x180 -> 0x3C580)    state = base + 0x140
 
 [3] SMU-Governor (GFX clock)                THIRD
     0x3D000  payload image      (2992 B -> 0x3DBB0)
