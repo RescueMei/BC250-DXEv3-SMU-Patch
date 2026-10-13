@@ -36,7 +36,7 @@
  * carried by the transfer with no late hook. */
 #define SMU_METRICS_RELOC     0x0003B500u
 #define SMU_RELOC_SPARE_OFF   0x0072u
-#define SMU_RELOC_EXTRA_OFF   0x00F4u   /* SmuMetricsTable_t.Current */
+#define SMU_RELOC_EXTRA_OFF   0x00E8u  /* trailing SampleStart bytes, within 0xF4 */
 #define SMU_SPARE_OFF         0x0072u
 #define SMU_SPARE_MAGIC       0x67u
 #define SMU_STOCK_CORES       6u

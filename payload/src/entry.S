@@ -122,10 +122,10 @@ smu_spare_entry:
     s32i    a11, a1, 12
     s32i    a12, a1, 16
     movi    a8, 0x67
-    l32r    a9, .Lspare_addr
+    l32r    a9, .Lreloc_spare
     s16i    a8, a9, 0
     l32r    a9, .Ltail_addr
-    l32r    a10, .Lcontig_addr
+    l32r    a10, .Lreloc_extra
     l32i    a8, a9, 0x0C
     s32i    a8, a10, 0
     l32i    a8, a9, 0x10
@@ -147,3 +147,4 @@ smu_spare_entry:
 .Ltail_addr:   .word 0x0003B480
 .Lcontig_addr: .word 0x0000CC3C
 .Lreloc_spare: .word 0x0003B572
+.Lreloc_extra: .word 0x0003B5E8
