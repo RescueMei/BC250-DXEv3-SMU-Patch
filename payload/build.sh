@@ -37,15 +37,17 @@ run_make '
   entry=$(echo "$nm" | awk "/ T smu_patch_entry\$/{print \$1}")
   cc=$(echo "$nm" | awk "/ T smu_clamp_current\$/{print \$1}")
   ca=$(echo "$nm" | awk "/ T smu_clamp_average\$/{print \$1}")
+  sp=$(echo "$nm" | awk "/ T smu_spare_entry\$/{print \$1}")
   undef=$(xtensa-esp32-elf-nm -u smu_patch.elf)
   [ -n "$entry" ] || { echo "  ERROR: smu_patch_entry not found"; exit 1; }
   [ -n "$cc" ] || { echo "  ERROR: smu_clamp_current not found"; exit 1; }
   [ -n "$ca" ] || { echo "  ERROR: smu_clamp_average not found"; exit 1; }
+  [ -n "$sp" ] || { echo "  ERROR: smu_spare_entry not found"; exit 1; }
   [ -z "$undef" ] || { echo "  ERROR: undefined symbols:"; echo "$undef"; exit 1; }
   # FP-assist guard: the SMU Xtensa core has no windowed FP-assist helpers.
   bad=$(xtensa-esp32-elf-objdump -d smu_patch.elf | grep -cE "float|libgcc|__.*sf|__.*df" || true)
   base=$((0x3ae00))
-  off=$((0x$entry - base)); occ=$((0x$cc - base)); oca=$((0x$ca - base))
+  off=$((0x$entry - base)); occ=$((0x$cc - base)); oca=$((0x$ca - base)); osp=$((0x$sp - base))
   printf "  entry=0x%s(0x%x) clamp_cur=0x%s(0x%x) clamp_avg=0x%s(0x%x) bin=%s bytes fp=%s\n" \
     "$entry" "$off" "$cc" "$occ" "$ca" "$oca" "$(wc -c < smu_patch.bin)" "$bad"
   {
@@ -56,6 +58,7 @@ run_make '
     echo "#define SMU_PATCH_ENTRY_OFFSET         0x$(printf %x "$off")u"
     echo "#define SMU_PATCH_CLAMP_CURRENT_OFFSET 0x$(printf %x "$occ")u"
     echo "#define SMU_PATCH_CLAMP_AVERAGE_OFFSET 0x$(printf %x "$oca")u"
+    echo "#define SMU_PATCH_SPARE_OFFSET         0x$(printf %x "$osp")u"
     echo "#endif"
   } > SmuPatchMeta.h
   echo "  OK"
