@@ -129,8 +129,10 @@ WaitForDoneStatus (
   UINT64  Start;
   UINT64  ElapsedUs;
   UINT32  Value;
+  UINTN   Iterations;
 
-  Start = GetPerformanceCounter ();
+  Start      = GetPerformanceCounter ();
+  Iterations = 0;
 
   for (;;) {
     Value = SmnRead32 (RspAddress);
@@ -140,7 +142,7 @@ WaitForDoneStatus (
     }
 
     ElapsedUs = DivU64x32 (GetTimeInNanoSecond (GetPerformanceCounter () - Start), 1000U);
-    if (ElapsedUs >= TimeoutUs) {
+    if (ElapsedUs >= TimeoutUs || ++Iterations >= SMU_PATCH_MAILBOX_POLL_MAX_ITER) {
       *Status = Value;
       return EFI_TIMEOUT;
     }
@@ -404,6 +406,121 @@ SmuWriteDword (
 }
 
 /**
+  Invoke one SMU cache-maintenance helper (d-cache 0x30B3 / i-cache 0x30EB) at a
+  dword-aligned address, restoring the scratch FLAG/MASK afterwards.  Mirrors the
+  reference deployer's cache_helper().
+
+  @param[in]  Function   0x30B3 (data) or 0x30EB (instruction).
+  @param[in]  Address    Dword-aligned SMU-local address.
+  @param[in]  Flag       Scratch CP_FLAG value.
+  @param[in]  Mask       Scratch CP_MASK value.
+  @param[in]  DmaBuffer  Virtual address of the 4 KB DMA-able page.
+
+  @retval EFI_SUCCESS  The helper ran.
+  @retval others       A mailbox step failed or the response was unexpected.
+**/
+STATIC
+EFI_STATUS
+SmuCacheHelper (
+  IN UINT32  Function,
+  IN UINT32  Address,
+  IN UINT32  Flag,
+  IN UINT32  Mask,
+  IN VOID    *DmaBuffer
+  )
+{
+  UINT32      Args[6];
+  UINT32      Status;
+  EFI_STATUS  Result;
+  UINT32      Out;
+
+  Result = SmuWriteDword (SMU_PATCH_CP_FLAG, Flag);
+  if (EFI_ERROR (Result)) return Result;
+  Result = SmuWriteDword (SMU_PATCH_CP_CB, Function);
+  if (EFI_ERROR (Result)) return Result;
+
+  ZeroMem (Args, sizeof (Args));
+  Args[0] = 0x3AU;
+  Args[1] = 0x22U;
+  Args[4] = Address;
+
+  Result = SendMailbox (
+             SMU_PATCH_Q2_CMD,
+             SMU_PATCH_Q2_RSP,
+             SMU_PATCH_Q2_ARG,
+             SMU_PATCH_Q2_MSG_TRANSFER,
+             Args,
+             &Status
+             );
+  if (EFI_ERROR (Result)) return Result;
+
+  Out = SmnRead32 (SMU_PATCH_Q2_ARG);
+  if (Out != 2U && Out != 3U) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cache helper 0x%X @0x%05X out=0x%X\n",
+      Function, Address, Out));
+    return EFI_DEVICE_ERROR;
+  }
+
+  SmuWriteDword (SMU_PATCH_CP_MASK, Mask);
+  SmuWriteDword (SMU_PATCH_CP_FLAG, Flag);
+  return EFI_SUCCESS;
+}
+
+/**
+  Publish (invalidate) the d-cache and i-cache for [Start, End) so the SMU sees
+  freshly written code.  Mirrors the reference deployer's cache_publish().
+
+  @param[in]  Start,End  Half-open SMU-local byte range to publish.
+  @param[in]  Flag       Scratch CP_FLAG value.
+  @param[in]  Mask       Scratch CP_MASK value.
+  @param[in]  DmaBuffer  Virtual address of the 4 KB DMA-able page.
+
+  @retval EFI_SUCCESS  The range was published.
+  @retval others       A mailbox step failed.
+**/
+STATIC
+EFI_STATUS
+SmuCachePublish (
+  IN UINT32  Start,
+  IN UINT32  End,
+  IN UINT32  Flag,
+  IN UINT32  Mask,
+  IN VOID    *DmaBuffer
+  )
+{
+  UINT32      Address;
+  UINT32      Args[6];
+  UINT32      Status;
+  EFI_STATUS  Result;
+
+  for (Address = Start & ~15U; Address < End; Address += 16U) {
+    Result = SmuCacheHelper (SMU_PATCH_CACHE_FN_DATA, Address, Flag, Mask, DmaBuffer);
+    if (EFI_ERROR (Result)) return Result;
+  }
+  for (Address = Start & ~31U; Address < End; Address += 32U) {
+    Result = SmuCacheHelper (SMU_PATCH_CACHE_FN_INSTR, Address, Flag, Mask, DmaBuffer);
+    if (EFI_ERROR (Result)) return Result;
+  }
+
+  ZeroMem (Args, sizeof (Args));
+  Args[0] = SMU_PATCH_CACHE_MARKER;
+  Result = SendMailbox (
+             SMU_PATCH_Q2_CMD,
+             SMU_PATCH_Q2_RSP,
+             SMU_PATCH_Q2_ARG,
+             SMU_PATCH_Q2_MSG_TRANSFER,
+             Args,
+             &Status
+             );
+  if (EFI_ERROR (Result)) return Result;
+  if (SmnRead32 (SMU_PATCH_Q2_ARG) != 3U) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cache marker did not return 3\n"));
+    return EFI_DEVICE_ERROR;
+  }
+  return EFI_SUCCESS;
+}
+
+/**
   Read the DXEv3 menu driver's SMU patch configuration variable.
 
   @param[out] PatchEnabled  TRUE when SmuReportingPatch (byte offset 0) is set.
@@ -568,40 +685,126 @@ InstallJump3 (
 }
 
 /**
-  Apply the three MANUAL (non-compilable) hooks that wire the compiled payload:
+  Apply the four MANUAL (non-compilable) hooks that wire the compiled payload,
+  each followed by a cache publish (matching the reference deployer):
 
     0x29BE5  j smu_clamp_current   (Current fill loop bound -> min(count, 6))
     0x29A0F  j smu_clamp_average   (Average fill loop bound -> min(count, 6))
     0x29A1D  j smu_patch_entry     (emit the fixed-size tail)
+    0x29CB8  j smu_spare_entry     (stamp Current.Spare after the Current fill)
 **/
+//
+// The four hook sites, each written as a 3-byte "j".  The dwords they touch
+// (a 3-byte site can straddle two dwords) are saved before any write so a
+// failed install can be rolled back to the pristine bytes.
+//
+STATIC CONST UINT32  mHookSites[4] = {
+  SMU_PATCH_CLAMP_CURRENT_ADDR, SMU_PATCH_CLAMP_AVERAGE_ADDR,
+  SMU_PATCH_HOOK_ADDR, SMU_PATCH_SPARE_ADDR
+};
+
 STATIC
 EFI_STATUS
 InstallHooks (
-  IN VOID  *DmaBuffer
+  IN VOID    *DmaBuffer,
+  IN UINT32  Flag,
+  IN UINT32  Mask
   )
 {
   EFI_STATUS  Status;
   UINT32      Entry = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_ENTRY_OFFSET;
+  UINT32      Target[4];
+  UINT32      SavedAddr[SMU_PATCH_MAX_HOOK_DWORDS];
+  UINT32      SavedVal[SMU_PATCH_MAX_HOOK_DWORDS];
+  UINTN       SavedCount;
+  UINTN       Site;
+  UINTN       Index;
+  UINTN       Saved;
+  UINT32      DwordAddr;
+  UINT32      Val;
+  BOOLEAN     Found;
+
+  Target[0] = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_CURRENT_OFFSET;
+  Target[1] = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_AVERAGE_OFFSET;
+  Target[2] = Entry;
+  Target[3] = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_SPARE_OFFSET;
 
   DEBUG ((DEBUG_INFO,
-    "BC250DXEv3SMUPatchDxe: hooks clamp_cur@0x%05X->0x%05X clamp_avg@0x%05X->0x%05X entry@0x%05X->0x%05X\n",
-    SMU_PATCH_CLAMP_CURRENT_ADDR, SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_CURRENT_OFFSET,
-    SMU_PATCH_CLAMP_AVERAGE_ADDR, SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_AVERAGE_OFFSET,
-    SMU_PATCH_HOOK_ADDR, Entry));
+    "BC250DXEv3SMUPatchDxe: hooks clamp_cur@0x%05X->0x%05X clamp_avg@0x%05X->0x%05X "
+    "entry@0x%05X->0x%05X spare@0x%05X->0x%05X\n",
+    SMU_PATCH_CLAMP_CURRENT_ADDR, Target[0],
+    SMU_PATCH_CLAMP_AVERAGE_ADDR, Target[1],
+    SMU_PATCH_HOOK_ADDR, Entry,
+    SMU_PATCH_SPARE_ADDR, Target[3]));
 
-  Status = InstallJump3 (SMU_PATCH_CLAMP_CURRENT_ADDR,
-                         SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_CURRENT_OFFSET, DmaBuffer);
-  if (EFI_ERROR (Status)) return Status;
-  Status = InstallJump3 (SMU_PATCH_CLAMP_AVERAGE_ADDR,
-                         SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_CLAMP_AVERAGE_OFFSET, DmaBuffer);
-  if (EFI_ERROR (Status)) return Status;
-  Status = InstallJump3 (SMU_PATCH_HOOK_ADDR, Entry, DmaBuffer);
-  if (EFI_ERROR (Status)) return Status;
-  return EFI_SUCCESS;
+  //
+  // Snapshot every dword any hook will modify, so a partial install can be
+  // reverted to an unpatched (safe) state.
+  //
+  SavedCount = 0;
+  for (Site = 0; Site < 4; Site++) {
+    for (Index = 0; Index < 3; Index++) {
+      DwordAddr = (mHookSites[Site] + (UINT32)Index) & ~3U;
+      Found = FALSE;
+      for (Saved = 0; Saved < SavedCount; Saved++) {
+        if (SavedAddr[Saved] == DwordAddr) {
+          Found = TRUE;
+          break;
+        }
+      }
+      if (Found) {
+        continue;
+      }
+      if (SavedCount >= SMU_PATCH_MAX_HOOK_DWORDS) {
+        DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: too many hook dwords\n"));
+        return EFI_OUT_OF_RESOURCES;
+      }
+      Status = SmuReadDword (DwordAddr, DmaBuffer, &Val);
+      if (EFI_ERROR (Status)) {
+        return Status;
+      }
+      SavedAddr[SavedCount] = DwordAddr;
+      SavedVal[SavedCount]  = Val;
+      SavedCount++;
+    }
+  }
+
+  for (Site = 0; Site < 4; Site++) {
+    Status = InstallJump3 (mHookSites[Site], Target[Site], DmaBuffer);
+    if (EFI_ERROR (Status)) {
+      break;
+    }
+    //
+    // Publish this hook so the SMU picks up the new jump (d-cache + i-cache).
+    //
+    Status = SmuCachePublish (mHookSites[Site] & ~3U, (mHookSites[Site] & ~3U) + 4U,
+                              Flag, Mask, DmaBuffer);
+    if (EFI_ERROR (Status)) {
+      break;
+    }
+  }
+
+  if (EFI_ERROR (Status)) {
+    //
+    // Restore the originals so we never leave the SMU with a half-installed
+    // hook (a torn jump into the metrics path wedges the SMU).
+    //
+    for (Saved = 0; Saved < SavedCount; Saved++) {
+      SmuWriteDword (SavedAddr[Saved], SavedVal[Saved]);
+    }
+    DEBUG ((DEBUG_ERROR,
+      "BC250DXEv3SMUPatchDxe: hook install failed (%r); rolled back %u dword(s)\n",
+      Status, (UINT32)SavedCount));
+  }
+
+  return Status;
 }
 
 /**
-  Apply the metrics patch: inject the compiled payload, then the manual hooks.
+  Apply the metrics patch: read the cache scratch state, inject the compiled
+  payload, install the manual hooks, then relocate the metrics base literal.
+  Every write group is followed by a cache publish, matching the reference
+  deployer (deploy_one.py).
 **/
 STATIC
 EFI_STATUS
@@ -610,9 +813,59 @@ ApplySmuPatch (
   )
 {
   EFI_STATUS  Status;
+  UINT32      Flag;
+  UINT32      Mask;
+
+  //
+  // Save the SMU cache scratch state once, so every publish can restore it.
+  //
+  Status = SmuReadDword (SMU_PATCH_CP_FLAG, DmaBuffer, &Flag);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cannot read CP_FLAG: %r\n", Status));
+    return Status;
+  }
+  Status = SmuReadDword (SMU_PATCH_CP_MASK, DmaBuffer, &Mask);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cannot read CP_MASK: %r\n", Status));
+    return Status;
+  }
+
   Status = InjectPayload (DmaBuffer);
-  if (EFI_ERROR (Status)) return Status;
-  return InstallHooks (DmaBuffer);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  Status = SmuCachePublish (SMU_PATCH_PAYLOAD_BASE,
+                            SMU_PATCH_PAYLOAD_BASE + (UINT32)smu_patch_payload_len,
+                            Flag, Mask, DmaBuffer);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = InstallHooks (DmaBuffer, Flag, Mask);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  //
+  // Relocate the metrics base literal so the fills write to the free region the
+  // payload's spare/extra writes target (see payload/src/smu_patch_map.h).
+  //
+  Status = SmuWriteDword (SMU_PATCH_RELOC_LITERAL, SMU_PATCH_METRICS_RELOC);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: metrics relocation write failed: %r\n", Status));
+    return Status;
+  }
+  Status = SmuCachePublish (SMU_PATCH_RELOC_LITERAL & ~3U,
+                            (SMU_PATCH_RELOC_LITERAL & ~3U) + 4U,
+                            Flag, Mask, DmaBuffer);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: metrics base relocated to 0x%05X\n",
+    SMU_PATCH_METRICS_RELOC));
+
+  return EFI_SUCCESS;
 }
 
 /**
@@ -681,8 +934,17 @@ BC250DXEv3SMUPatchEntryPoint (
   DmaBuffer = (VOID *)(UINTN)DmaPage;
 
   Status = ApplySmuPatch (DmaBuffer);
+  if (EFI_ERROR (Status)) {
+    //
+    // Surface the failure instead of swallowing it.  InstallHooks() rolls its
+    // hooks back on error, so a failed apply should leave the SMU unpatched;
+    // make that visible in the boot log.
+    //
+    DEBUG ((DEBUG_ERROR,
+      "BC250DXEv3SMUPatchDxe: SMU patch apply FAILED (%r); SMU left unpatched\n", Status));
+  }
 
   gBS->FreePages (DmaPage, 1);
 
-  return EFI_SUCCESS;
+  return Status;
 }

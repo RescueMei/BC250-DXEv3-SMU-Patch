@@ -56,6 +56,11 @@
 //
 #define SMU_PATCH_MAILBOX_POLL_DELAY_US  2000U
 #define SMU_PATCH_MAILBOX_TIMEOUT_US     5000000U
+//
+// Hard iteration cap so a null/absent TimerLib (constant GetPerformanceCounter)
+// cannot make the time bound unreachable and hang DXE forever.
+//
+#define SMU_PATCH_MAILBOX_POLL_MAX_ITER  1000000U
 
 //
 // DMA page for transfer-engine reads.
@@ -95,8 +100,38 @@ typedef struct {
 //   0x29A0F  j smu_clamp_average   (Average fill FUN_00029848, resume 0x29A12)
 //   0x29A1D  j smu_patch_entry     (emit tail; replaces "l32r a7, 0xCA54")
 //
+//
+//   0x29CB8  j smu_spare_entry     (stamp Current.Spare after the Current fill)
+//
 #define SMU_PATCH_CLAMP_CURRENT_ADDR 0x00029BE5U
 #define SMU_PATCH_CLAMP_AVERAGE_ADDR 0x00029A0FU
 #define SMU_PATCH_HOOK_ADDR          0x00029A1DU
+#define SMU_PATCH_SPARE_ADDR         0x00029CB8U
+
+//
+// Metrics relocation.  The Current/Average fills load their base from the single
+// literal at image 0x17F24; the deploy patches it to the free metrics region so
+// the extra cores land where the driver reads them (see payload/src/smu_patch_map.h).
+//
+#define SMU_PATCH_RELOC_LITERAL      0x00017F24U
+#define SMU_PATCH_METRICS_RELOC      0x0003B500U
+
+//
+// SMU cache-maintenance registers/helpers (see the firmware map).  Writes into
+// live SMU code are only visible to the SMU after a d-cache + i-cache publish;
+// without it the SMU may run stale or torn instructions.
+//
+#define SMU_PATCH_CP_CB              0x000184F8U
+#define SMU_PATCH_CP_FLAG            0x0003FFBCU
+#define SMU_PATCH_CP_MASK            0x0003FFF0U
+#define SMU_PATCH_CACHE_FN_DATA      0x30B3U
+#define SMU_PATCH_CACHE_FN_INSTR     0x30EBU
+#define SMU_PATCH_CACHE_MARKER       0x0EU
+
+//
+// Max distinct dwords the four 3-byte hook sites can touch (a site may straddle
+// two dwords); bounds the rollback snapshot in InstallHooks().
+//
+#define SMU_PATCH_MAX_HOOK_DWORDS    12U
 
 #endif
