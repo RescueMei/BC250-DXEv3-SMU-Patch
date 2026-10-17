@@ -648,12 +648,20 @@ InjectPayload (
 /**
   Write a 3-byte Xtensa `j` at Site targeting Target (byte-granular RMW).
 **/
+//
+// Direct clamp: "movi a13, 6" (0xD2 0xA0 0x06).  The stock fills load the loop
+// bound with "l8ui a13, <cfg>, 26" (the CPU core count); replacing it with a
+// fixed 6 caps the 6-wide per-core arrays exactly, with no helper jump (a jump
+// would straddle dwords and depend on i-cache invalidation of both).
+//
+STATIC CONST UINT8  mClampMovi[3] = { 0xD2, 0xA0, 0x06 };
+
 STATIC
 EFI_STATUS
-InstallJump3 (
-  IN UINT32  Site,
-  IN UINT32  Target,
-  IN VOID    *DmaBuffer
+InstallBytes3 (
+  IN UINT32        Site,
+  IN CONST UINT8   *Bytes,
+  IN VOID          *DmaBuffer
   )
 {
   EFI_STATUS  Status;
@@ -661,13 +669,7 @@ InstallJump3 (
   UINT32      DwordValue;
   UINT32      VerifyValue;
   UINT32      Shift;
-  UINT32      Jump = ComputeJump (Site, Target);
-  UINT8       Bytes[3];
   UINTN       Index;
-
-  Bytes[0] = (UINT8)( Jump        & 0xFFU);
-  Bytes[1] = (UINT8)((Jump >>  8) & 0xFFU);
-  Bytes[2] = (UINT8)((Jump >> 16) & 0xFFU);
 
   for (Index = 0; Index < 3; Index++) {
     DwordAddress = Site + (UINT32)Index;
@@ -677,11 +679,28 @@ InstallJump3 (
     Status = SmuWriteDword (DwordAddress, DwordValue);              if (EFI_ERROR (Status)) return Status;
     Status = SmuReadDword (DwordAddress, DmaBuffer, &VerifyValue);  if (EFI_ERROR (Status)) return Status;
     if (((VerifyValue >> Shift) & 0xFFU) != Bytes[Index]) {
-      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: jump verify mismatch @0x%05X\n", Site + (UINT32)Index));
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: patch verify mismatch @0x%05X\n", Site + (UINT32)Index));
       return EFI_DEVICE_ERROR;
     }
   }
   return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+InstallJump3 (
+  IN UINT32  Site,
+  IN UINT32  Target,
+  IN VOID    *DmaBuffer
+  )
+{
+  UINT32  Jump = ComputeJump (Site, Target);
+  UINT8   Bytes[3];
+
+  Bytes[0] = (UINT8)( Jump        & 0xFFU);
+  Bytes[1] = (UINT8)((Jump >>  8) & 0xFFU);
+  Bytes[2] = (UINT8)((Jump >> 16) & 0xFFU);
+  return InstallBytes3 (Site, Bytes, DmaBuffer);
 }
 
 /**
@@ -770,14 +789,24 @@ InstallHooks (
   }
 
   for (Site = 0; Site < 4; Site++) {
-    Status = InstallJump3 (mHookSites[Site], Target[Site], DmaBuffer);
+    if (Site < 2) {
+      //
+      // The two loop-bound clamp sites get the direct "movi a13, 6".
+      //
+      Status = InstallBytes3 (mHookSites[Site], mClampMovi, DmaBuffer);
+    } else {
+      Status = InstallJump3 (mHookSites[Site], Target[Site], DmaBuffer);
+    }
     if (EFI_ERROR (Status)) {
       break;
     }
     //
     // Publish this hook so the SMU picks up the new jump (d-cache + i-cache).
+    // A 3-byte jump can straddle two dwords, so publish every dword it touches;
+    // invalidating only the first would leave a torn jump in the i-cache.
     //
-    Status = SmuCachePublish (mHookSites[Site] & ~3U, (mHookSites[Site] & ~3U) + 4U,
+    Status = SmuCachePublish (mHookSites[Site] & ~3U,
+                              ((mHookSites[Site] + 2U) & ~3U) + 4U,
                               Flag, Mask, DmaBuffer);
     if (EFI_ERROR (Status)) {
       break;
@@ -846,6 +875,15 @@ ApplySmuPatch (
     return Status;
   }
 
+#ifndef SMU_PATCH_RELOCATE
+  //
+  // 1 enables the metrics-base relocation (fills -> free region that the
+  // payload's spare/extra writes target); 0 disables it (diagnostic only).
+  //
+#define SMU_PATCH_RELOCATE 1
+#endif
+
+#if SMU_PATCH_RELOCATE
   //
   // Relocate the metrics base literal so the fills write to the free region the
   // payload's spare/extra writes target (see payload/src/smu_patch_map.h).
@@ -864,6 +902,9 @@ ApplySmuPatch (
 
   DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: metrics base relocated to 0x%05X\n",
     SMU_PATCH_METRICS_RELOC));
+#else
+  DEBUG ((DEBUG_WARN, "BC250DXEv3SMUPatchDxe: metrics relocation DISABLED (diagnostic)\n"));
+#endif
 
   return EFI_SUCCESS;
 }
