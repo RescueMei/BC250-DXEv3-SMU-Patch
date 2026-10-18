@@ -109,6 +109,12 @@ typedef struct {
 #define SMU_PATCH_SPARE_ADDR         0x00029CB8U
 
 //
+// Tick-slot service hook (same context as the governor/CU; not the fill).
+//
+#define SMU_PATCH_TICK_SLOT_ADDR     0x0000C780U
+#define SMU_PATCH_TICK_SLOT_NOOP     0x0001B220U
+
+//
 // Metrics relocation.  The Current/Average fills load their base from the single
 // literal at image 0x17F24; the deploy patches it to the free metrics region so
 // the extra cores land where the driver reads them (see payload/src/smu_patch_map.h).

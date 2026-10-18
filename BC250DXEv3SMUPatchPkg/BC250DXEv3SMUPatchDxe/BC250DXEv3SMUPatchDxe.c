@@ -704,13 +704,10 @@ InstallJump3 (
 }
 
 /**
-  Apply the four MANUAL (non-compilable) hooks that wire the compiled payload,
-  each followed by a cache publish (matching the reference deployer):
-
-    0x29BE5  j smu_clamp_current   (Current fill loop bound -> min(count, 6))
-    0x29A0F  j smu_clamp_average   (Average fill loop bound -> min(count, 6))
-    0x29A1D  j smu_patch_entry     (emit the fixed-size tail)
-    0x29CB8  j smu_spare_entry     (stamp Current.Spare after the Current fill)
+  Apply the two loop-bound clamps (movi a13, 6) so the stock fills never overrun
+  the 6-wide arrays.  The 8-core emitter runs from a free tick slot
+  (InstallTickHook), not from the metrics fill, so no fill-context hook is
+  installed.
 **/
 //
 // The four hook sites, each written as a 3-byte "j".  The dwords they touch
@@ -788,7 +785,7 @@ InstallHooks (
     }
   }
 
-  for (Site = 0; Site < 4; Site++) {
+  for (Site = 0; Site < 2; Site++) {
     if (Site < 2) {
       //
       // The two loop-bound clamp sites get the direct "movi a13, 6".
@@ -827,6 +824,51 @@ InstallHooks (
   }
 
   return Status;
+}
+
+//
+// Install the emitter in a free SMU tick slot.  The tick runner calls handlers
+// with the standard windowed ABI (like the governor/CU), avoiding the metrics
+// fill's context-switch hazard.  Refuses if the slot is occupied.
+//
+STATIC
+EFI_STATUS
+InstallTickHook (
+  IN VOID    *DmaBuffer,
+  IN UINT32  Flag,
+  IN UINT32  Mask
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      Existing;
+  UINT32      Entry;
+
+  Status = SmuReadDword (SMU_PATCH_TICK_SLOT_ADDR, DmaBuffer, &Existing);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: cannot read tick slot: %r\n", Status));
+    return Status;
+  }
+  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: tick slot 0x%05X = 0x%08X\n",
+    SMU_PATCH_TICK_SLOT_ADDR, Existing));
+  if (Existing != 0 && Existing != SMU_PATCH_TICK_SLOT_NOOP) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: tick slot occupied; refusing to install\n"));
+    return EFI_ABORTED;
+  }
+  Entry = SMU_PATCH_PAYLOAD_BASE + SMU_PATCH_ENTRY_OFFSET;
+  Status = SmuWriteDword (SMU_PATCH_TICK_SLOT_ADDR, Entry);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: tick slot write failed: %r\n", Status));
+    return Status;
+  }
+  Status = SmuCachePublish (SMU_PATCH_TICK_SLOT_ADDR & ~3U,
+                            (SMU_PATCH_TICK_SLOT_ADDR & ~3U) + 4U,
+                            Flag, Mask, DmaBuffer);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: tick slot 0x%05X -> 0x%05X\n",
+    SMU_PATCH_TICK_SLOT_ADDR, Entry));
+  return EFI_SUCCESS;
 }
 
 /**
@@ -871,6 +913,11 @@ ApplySmuPatch (
   }
 
   Status = InstallHooks (DmaBuffer, Flag, Mask);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = InstallTickHook (DmaBuffer, Flag, Mask);
   if (EFI_ERROR (Status)) {
     return Status;
   }
