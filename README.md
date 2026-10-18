@@ -57,17 +57,17 @@ Free region `0x3AE00..0x40000`. Disjoint slices (checked, no overlaps):
 ```
 payload/
   src/smu_patch.c             extra-core emit + Spare magic (the compiled patch)
-  src/entry.S                 smu_patch_entry: save a0-a7, call C, resume 0x29A20
+  src/entry.S                 smu_patch_entry: tick handler, calls the C emitter
   src/smu_patch_map.h         decoded SMU addresses (Current @0xCB54, ...)
   src/linker.ld / Makefile / build.sh
-BC250DXEv3SMUPatchPkg/        edk2 DXE driver (inject + hooks)
+BC250DXEv3SMUPatchPkg/        edk2 DXE driver (inject + clamps + tick-slot hook)
 BC250DXEv3SMUPatchDxe.h       SMU_PATCH_CAP_ADDR / SMU_PATCH_CAP2_ADDR / SMU_PATCH_HOOK_ADDR
 ```
 
 ## Build
 ```
 git submodule update --init --recursive   # DXEBUILD
-./build.sh                                # payload (Xtensa) -> DXE .efi/.ffs
+./build_ffs.sh                            # prebuild payload (Xtensa) + DXE .efi/.ffs
 ```
 
 ## Validation (live via SMUProbe + Linux `gpu_metrics`)
