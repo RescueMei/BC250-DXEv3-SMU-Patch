@@ -59,7 +59,8 @@ payload/
   src/smu_patch.c             extra-core emit + Spare magic (the compiled patch)
   src/entry.S                 smu_patch_entry: tick handler, calls the C emitter
   src/smu_patch_map.h         decoded SMU addresses (Current @0xCB54, ...)
-  src/linker.ld / Makefile / build.sh
+  build.sh                    native payload build (Xtensa)
+  src/linker.ld / Makefile
 BC250DXEv3SMUPatchPkg/        edk2 DXE driver (inject + clamps + tick-slot hook)
 BC250DXEv3SMUPatchDxe.h       SMU_PATCH_CAP_ADDR / SMU_PATCH_CAP2_ADDR / SMU_PATCH_HOOK_ADDR
 ```
