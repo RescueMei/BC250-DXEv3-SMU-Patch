@@ -624,6 +624,7 @@ InjectPayload (
   UINTN       Words;
   UINT32      Expected;
   UINT32      Value;
+  UINT32      Verify;
 
   if (smu_patch_payload_len == 0 || (smu_patch_payload_len & 3U) != 0 ||
       smu_patch_payload_len > MEIMEIDXEV3_SMU_PATCH_MAX) {
@@ -651,6 +652,16 @@ InjectPayload (
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: payload write failed at word %u\n", (UINT32)Index));
       return Status;
+    }
+    Status = SmuReadDword (SMU_PATCH_PAYLOAD_BASE + (UINT32)Index * 4U, DmaBuffer, &Verify);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+    if (Verify != Value) {
+      DEBUG ((DEBUG_ERROR,
+        "BC250DXEv3SMUPatchDxe: payload verify mismatch @0x%05X: wrote 0x%08X read 0x%08X\n",
+        SMU_PATCH_PAYLOAD_BASE + (UINT32)Index * 4U, Value, Verify));
+      return EFI_DEVICE_ERROR;
     }
   }
   return EFI_SUCCESS;
