@@ -50,8 +50,7 @@ STATIC_ASSERT (
 // Vendor GUID of the DXEv3 configuration variables (must match the menu
 // driver's BC250DXEv3MenuDriver.h definition exactly).
 //
-EFI_GUID  gMeiMeiDXEv3ConfigVarGuid =
-  { 0x49CC168D, 0xE8B0, 0x4613, { 0xA8, 0x07, 0x16, 0x96, 0x99, 0x86, 0x72, 0x6F } };
+EFI_GUID  gMeiMeiDXEv3ConfigVarGuid = MEIMEIDXEV3_CONFIG_VAR_GUID;
 
 #define SMU_PATCH_PCI_SEGMENT_ADDRESS(Offset) \
   PCI_SEGMENT_LIB_ADDRESS (SMU_PATCH_PCI_SEGMENT, SMU_PATCH_PCI_BUS, SMU_PATCH_PCI_DEVICE, SMU_PATCH_PCI_FUNCTION, (Offset))
@@ -547,6 +546,7 @@ GetPatchEnabled (
   EFI_STATUS  Status;
   UINTN       DataSize;
   UINT8       SmuConfig[1];
+  UINT32      Attributes;
 
   *PatchEnabled = FALSE;
   DataSize = sizeof (SmuConfig);
@@ -555,13 +555,20 @@ GetPatchEnabled (
   Status = gRT->GetVariable (
                   SMU_PATCH_CONFIG_VAR_NAME,
                   &gMeiMeiDXEv3ConfigVarGuid,
-                  NULL,
+                  &Attributes,
                   &DataSize,
                   SmuConfig
                   );
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "BC250DXEv3SMUPatchDxe: failed to read SMU variable: %r\n", Status));
     return Status;
+  }
+
+  if (Attributes != MEIMEIDXEV3_CONFIG_VAR_ATTRIBUTES) {
+    DEBUG ((DEBUG_WARN,
+            "BC250DXEv3SMUPatchDxe: SMU variable has attributes 0x%x (want 0x%x), patch disabled\n",
+            Attributes, MEIMEIDXEV3_CONFIG_VAR_ATTRIBUTES));
+    return EFI_SECURITY_VIOLATION;
   }
 
   if (DataSize <= SMU_PATCH_CONFIG_VAR_OFFSET) {
@@ -864,6 +871,7 @@ InstallTickHook (
   EFI_STATUS  Status;
   UINT32      Existing;
   UINT32      Entry;
+  UINT32      Verify;
 
   Status = SmuReadDword (SMU_PATCH_TICK_SLOT_ADDR, DmaBuffer, &Existing);
   if (EFI_ERROR (Status)) {
@@ -881,6 +889,16 @@ InstallTickHook (
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: tick slot write failed: %r\n", Status));
     return Status;
+  }
+  Status = SmuReadDword (SMU_PATCH_TICK_SLOT_ADDR, DmaBuffer, &Verify);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if (Verify != Entry) {
+    DEBUG ((DEBUG_ERROR,
+      "BC250DXEv3SMUPatchDxe: tick slot verify mismatch: wrote 0x%08X read 0x%08X\n",
+      Entry, Verify));
+    return EFI_DEVICE_ERROR;
   }
   Status = SmuCachePublish (SMU_PATCH_TICK_SLOT_ADDR & ~3U,
                             (SMU_PATCH_TICK_SLOT_ADDR & ~3U) + 4U,
@@ -908,6 +926,7 @@ ApplySmuPatch (
   EFI_STATUS  Status;
   UINT32      Flag;
   UINT32      Mask;
+  UINT32      Verify;
 
   //
   // Save the SMU cache scratch state once, so every publish can restore it.
@@ -961,6 +980,16 @@ ApplySmuPatch (
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: metrics relocation write failed: %r\n", Status));
     return Status;
+  }
+  Status = SmuReadDword (SMU_PATCH_RELOC_LITERAL, DmaBuffer, &Verify);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if (Verify != SMU_PATCH_METRICS_RELOC) {
+    DEBUG ((DEBUG_ERROR,
+      "BC250DXEv3SMUPatchDxe: metrics relocation verify mismatch: wrote 0x%08X read 0x%08X\n",
+      SMU_PATCH_METRICS_RELOC, Verify));
+    return EFI_DEVICE_ERROR;
   }
   Status = SmuCachePublish (SMU_PATCH_RELOC_LITERAL & ~3U,
                             (SMU_PATCH_RELOC_LITERAL & ~3U) + 4U,
