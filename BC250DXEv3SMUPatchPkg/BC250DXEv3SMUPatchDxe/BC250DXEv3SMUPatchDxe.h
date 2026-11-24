@@ -2,6 +2,8 @@
 #define BC250DXEV3SMUPATCHDXE_H_
 
 #include <Uefi.h>
+#include <Config/MeiMeiDXEv3Config.h>
+#include <Smu/MeiMeiDXEv3SmuMap.h>
 
 //
 // Host bridge PCI configuration-space access window (SMN indirect access).
@@ -56,6 +58,11 @@
 //
 #define SMU_PATCH_MAILBOX_POLL_DELAY_US  2000U
 #define SMU_PATCH_MAILBOX_TIMEOUT_US     5000000U
+//
+// Hard iteration cap so a null/absent TimerLib (constant GetPerformanceCounter)
+// cannot make the time bound unreachable and hang DXE forever.
+//
+#define SMU_PATCH_MAILBOX_POLL_MAX_ITER  1000000U
 
 //
 // DMA page for transfer-engine reads.
@@ -66,7 +73,7 @@
 // Enable gate: read the DXEv3 menu driver's SMU patch variable. The patch is
 // only applied when SmuReportingPatch (offset 0) is set.
 //
-#define SMU_PATCH_CONFIG_VAR_NAME        L"MeiMeiDXEv3SmuPatchVar"
+#define SMU_PATCH_CONFIG_VAR_NAME        MEIMEIDXEV3_SMU_PATCH_VAR_NAME
 #define SMU_PATCH_CONFIG_VAR_OFFSET      0U
 #define SMU_PATCH_CONFIG_ENABLED         1U
 
@@ -83,63 +90,56 @@ typedef struct {
   UINT8   Data[3];
 } SMU_PATCH_SITE;
 
-STATIC CONST SMU_PATCH_SITE  mSmuPatchSites[] = {
-  { 0x29863, 3, { 0xA2, 0x14, 0x70 } },
-  { 0x2987E, 3, { 0xA2, 0x54, 0x70 } },
-  { 0x29884, 3, { 0xA2, 0x14, 0x72 } },
-  { 0x2989C, 3, { 0xA2, 0x54, 0x72 } },
-  { 0x298A2, 3, { 0xA2, 0x14, 0x73 } },
-  { 0x298BA, 3, { 0xA2, 0x54, 0x73 } },
-  { 0x298BD, 3, { 0xA2, 0x14, 0x74 } },
-  { 0x298CB, 3, { 0xB2, 0x54, 0x74 } },
-  { 0x298DD, 3, { 0xA2, 0x14, 0x75 } },
-  { 0x298E8, 3, { 0xA2, 0x54, 0x75 } },
-  { 0x29900, 3, { 0xA2, 0x22, 0x3B } },
-  { 0x2991A, 3, { 0xA2, 0x22, 0x3D } },
-  { 0x2991D, 3, { 0x82, 0x62, 0x3B } },
-  { 0x29937, 3, { 0xA2, 0x22, 0x3F } },
-  { 0x2993A, 3, { 0xB2, 0x62, 0x3D } },
-  { 0x29946, 3, { 0xA2, 0x62, 0x3F } },
-  { 0x29960, 3, { 0xA2, 0x24, 0x41 } },
-  { 0x2997A, 3, { 0xA2, 0x6D, 0x81 } },
-  { 0x299A2, 3, { 0xA2, 0x12, 0x44 } },
-  { 0x299C2, 3, { 0xA2, 0x52, 0x44 } },
-  { 0x299C8, 3, { 0xA2, 0x26, 0x26 } },
-  { 0x299DD, 3, { 0xA2, 0x66, 0x26 } },
-  { 0x299E0, 3, { 0xA2, 0x12, 0x5C } },
-  { 0x299FD, 3, { 0xA2, 0x12, 0x68 } },
-  { 0x29A00, 3, { 0xB2, 0x52, 0x5C } },
-  { 0x29A0C, 3, { 0xA2, 0x52, 0x68 } },
-  { 0x29A4B, 3, { 0xA2, 0x13, 0x64 } },
-  { 0x29A62, 3, { 0xA2, 0x13, 0x66 } },
-  { 0x29A65, 3, { 0x82, 0x53, 0x64 } },
-  { 0x29A71, 3, { 0xA2, 0x53, 0x66 } },
-  { 0x29A8E, 3, { 0xA2, 0x14, 0x71 } },
-  { 0x29AA9, 3, { 0xA2, 0x54, 0x71 } },
-  { 0x29AAF, 3, { 0xA2, 0x14, 0x84 } },
-  { 0x29AC7, 3, { 0xA2, 0x54, 0x84 } },
-  { 0x29ACD, 3, { 0xA2, 0x14, 0x85 } },
-  { 0x29AD9, 3, { 0xA2, 0x54, 0x85 } },
-  { 0x29B6E, 3, { 0x92, 0x52, 0x2E } },
-  { 0x29B71, 3, { 0xF2, 0x52, 0x30 } },
-  { 0x29B74, 3, { 0xE2, 0x52, 0x2C } },
-  { 0x29B77, 3, { 0x82, 0x52, 0x2F } },
-  { 0x29B92, 3, { 0xC2, 0x52, 0x31 } },
-  { 0x29BCD, 3, { 0xA2, 0x6F, 0x19 } },
-  { 0x29BD0, 3, { 0x82, 0x6F, 0x1B } },
-  { 0x29BD3, 3, { 0xE2, 0x6F, 0x1D } },
-  { 0x29BEE, 3, { 0x82, 0x62, 0x1F } },
-  { 0x29C30, 2, { 0xC9, 0x4D } },
-  { 0x29C32, 3, { 0xB2, 0x5A, 0x18 } },
-  { 0x29C35, 3, { 0x82, 0x5A, 0x24 } },
-  { 0x29C69, 3, { 0xF2, 0x5E, 0x20 } },
-  { 0x29C6C, 3, { 0xD2, 0x5E, 0x22 } },
-  { 0x29C9F, 3, { 0xE2, 0x52, 0x40 } },
-  { 0x29CA2, 3, { 0xF2, 0x52, 0x2D } },
-  { 0x29CA5, 3, { 0xD2, 0x52, 0x41 } },
-  { 0x29CB2, 3, { 0xC2, 0xA1, 0x1C } },
-};
 
-#define SMU_PATCH_TABLE_SIZE  (sizeof (mSmuPatchSites) / sizeof (mSmuPatchSites[0]))
+//
+// Manual hook sites (the non-compilable steps applied by the driver, after
+// injecting the compiled payload).  Everything else lives in the payload
+// (payload/src, built to SmuPatchPayload.h).  Each stock fill loads its
+// per-core loop bound with a 3-byte "l8ui a13,<cfg>,26"; the driver replaces
+// each with a 3-byte "j <helper>" that sets a13 = min(count, 6) and resumes.
+//
+//   0x29BE5  j smu_clamp_current   (Current fill FUN_00029aec, resume 0x29BE8)
+//   0x29A0F  j smu_clamp_average   (Average fill FUN_00029848, resume 0x29A12)
+//   0x29A1D  j smu_patch_entry     (emit tail; replaces "l32r a7, 0xCA54")
+//
+//
+//   0x29CB8  j smu_spare_entry     (stamp Current.Spare after the Current fill)
+//
+#define SMU_PATCH_CLAMP_CURRENT_ADDR 0x00029BE5U
+#define SMU_PATCH_CLAMP_AVERAGE_ADDR 0x00029A0FU
+#define SMU_PATCH_HOOK_ADDR          0x00029A1DU
+#define SMU_PATCH_SPARE_ADDR         0x00029CB8U
+
+//
+// Tick-slot service hook (same context as the governor/CU; not the fill).
+//
+#define SMU_PATCH_TICK_SLOT_ADDR     0x0000C780U
+#define SMU_PATCH_TICK_SLOT_NOOP     0x0001B220U
+
+//
+// Metrics relocation.  The Current/Average fills load their base from the single
+// literal at image 0x17F24; the deploy patches it to the free metrics region so
+// the extra cores land where the driver reads them (see payload/src/smu_patch_map.h).
+//
+#define SMU_PATCH_RELOC_LITERAL      0x00017F24U
+#define SMU_PATCH_METRICS_RELOC      0x0003B500U
+
+//
+// SMU cache-maintenance registers/helpers (see the firmware map).  Writes into
+// live SMU code are only visible to the SMU after a d-cache + i-cache publish;
+// without it the SMU may run stale or torn instructions.
+//
+#define SMU_PATCH_CP_CB              MEIMEIDXEV3_SMU_CACHE_CB_ADDR
+#define SMU_PATCH_CP_FLAG            MEIMEIDXEV3_SMU_CACHE_FLAG_ADDR
+#define SMU_PATCH_CP_MASK            MEIMEIDXEV3_SMU_CACHE_MASK_ADDR
+#define SMU_PATCH_CACHE_FN_DATA      0x30B3U
+#define SMU_PATCH_CACHE_FN_INSTR     0x30EBU
+#define SMU_PATCH_CACHE_MARKER       0x0EU
+
+//
+// Max distinct dwords the four 3-byte hook sites can touch (a site may straddle
+// two dwords); bounds the rollback snapshot in InstallHooks().
+//
+#define SMU_PATCH_MAX_HOOK_DWORDS    12U
 
 #endif

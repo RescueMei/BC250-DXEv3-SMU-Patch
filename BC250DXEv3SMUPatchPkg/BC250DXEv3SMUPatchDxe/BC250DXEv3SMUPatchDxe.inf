@@ -9,9 +9,12 @@
 [Sources]
   BC250DXEv3SMUPatchDxe.c
   BC250DXEv3SMUPatchDxe.h
+  SmuPatchPayload.h
+  SmuPatchMeta.h
 
 [Packages]
   MdePkg/MdePkg.dec
+  MeiMeiDXEv3SharedPkg/MeiMeiDXEv3SharedPkg.dec
   BC250DXEv3SMUPatchPkg/BC250DXEv3SMUPatchPkg.dec
 
 [LibraryClasses]
