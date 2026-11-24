@@ -13,6 +13,16 @@
 #include "SmuPatchPayload.h"
 #include "SmuPatchMeta.h"
 
+#include <Smu/MeiMeiDXEv3SmuMap.h>
+
+//
+// The generated payload header and the canonical SMU map must agree.
+//
+STATIC_ASSERT (
+  SMU_PATCH_PAYLOAD_BASE == MEIMEIDXEV3_SMU_PATCH_BASE,
+  "Patch payload base must match the shared SMU map"
+  );
+
 //
 // This DXE driver applies the SMU firmware patch contained in
 // Ref/bc250-smu-unlock (patches.hex / patcher.py) to the BC-250 SMU.
@@ -615,7 +625,8 @@ InjectPayload (
   UINT32      Expected;
   UINT32      Value;
 
-  if (smu_patch_payload_len == 0 || (smu_patch_payload_len & 3U) != 0) {
+  if (smu_patch_payload_len == 0 || (smu_patch_payload_len & 3U) != 0 ||
+      smu_patch_payload_len > MEIMEIDXEV3_SMU_PATCH_MAX) {
     DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: bad payload length %u\n",
       (UINT32)smu_patch_payload_len));
     return EFI_BAD_BUFFER_SIZE;

@@ -3,9 +3,11 @@
  * The DXE driver verifies the region is all-zero, injects the raw image, and
  * installs the manual hooks.  Literals precede the code (l32r pool).
  *
- * Base 0x3D000 sits above the Governor payload (0x3AE00..0x3B9B0, state
- * 0x3C000) and the CU-Unlock payload (0x3C200..0x3C470, block ..0x3C670), so
- * all three drivers coexist.  Scratch is at 0x3D200 (smu_patch_layout.h).
+ * Base 0x3AE00 is this payload's lane in the canonical shared map
+ * (0x3AE00..0x3C000, shared MeiMeiDXEv3SmuMap.h).  Above it live the CU-Unlock
+ * payload (0x3C000), CU state (0x3C400), governor state (0x3C600) and governor
+ * payload (0x3D000); 0x3E000 is SMU firmware.  Scratch is at 0x3B200
+ * (smu_patch_layout.h), inside this lane.
  */
 ENTRY(smu_patch_entry)
 
