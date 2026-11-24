@@ -26,7 +26,9 @@ be unlocked first; the Depex enforces that.
 re-probes privileged access before patching and skips the work if the gate is
 closed. No other DXE driver is required.
 
-## Problem
+## How it works
+
+### Problem
 
 The stock metrics fill loops are count-bounded and write fixed six-entry arrays
 (`CoreFrequency[6]`, `CorePower[6]`, `CoreTemperature[6]`, `C0Residency[6]`).
@@ -36,7 +38,7 @@ each loop runs eight iterations and the last two overrun the following fields.
 (`Current + 0x38 + 6*2 = Current + 0x44`), which the amdgpu driver reports as
 the GPU clock.
 
-## Fix
+### Fix
 
 The driver keeps the stock struct unchanged for cores 0-5, stamps a magic value
 in `Spare`, and emits cores 6/7 into an expanded block immediately after it.
@@ -59,7 +61,7 @@ The compiled payload (`0x3AE00`, entry offset `0x28` -> `0x3AE28`):
 The metrics base literal at `0x17F24` is relocated to `0x3B500`, so the extra
 cores land in free SRAM rather than in unrelated firmware fields.
 
-## Metrics layout
+### Metrics layout
 
 ```
 SmuMetricsTable_t (0x74):   Current @ 0xCB54,   Average @ 0xCBC8
@@ -80,6 +82,11 @@ SmuMetricsTable_t (0x74):   Current @ 0xCB54,   Average @ 0xCBC8
 
 A missing, oversized, unreadable, or wrong-attribute variable means no patch and
 a normal boot.
+
+## Protocols
+
+Produces no protocol. It consumes `gMeiMeiDXEv3SmuUnlockProtocolGuid` through
+its Depex and re-probes privileged access before patching.
 
 ## SMU SRAM placement
 
