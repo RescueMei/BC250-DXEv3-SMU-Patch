@@ -1,36 +1,68 @@
-# BC250-DXEv3-SMU-Patch  (branch: TheBigOne)
+# BC250-DXEv3-SMU-Patch
 
-DXE driver that patches the **BC-250 SMU firmware** at boot so its metrics table
-**correctly reports all 8 CPU cores** (with the 8-core unlock active). Requires
-the SMU to be unlocked first (the SMU Unlock driver; enforced by `[Depex]`).
+DXE driver that patches the BC-250 SMU firmware so its metrics table reports all
+eight CPU cores correctly when the core unlock is active. It requires the SMU to
+be unlocked first; the Depex enforces that.
 
-## Problem
-The stock metrics fill loops are **count-bounded** and write fixed **6-entry**
-per-core arrays (`CoreFrequency[6]`, `CorePower[6]`, `CoreTemperature[6]`,
-`C0Residency[6]`). With the 8-core unlock the SMU core-count byte
-(`0x7AD8+0x1A`) is 8, so each loop runs 8 iterations and the last two overrun
-into the following fields. `C0Residency[6]` lands exactly on
-`Current.GfxclkFrequency` (`Current+0x38 + 6*2 = Current+0x44`) — the field the
-amdgpu driver reports as the GPU clock (`pp_dpm_sclk` / `rocm-smi` / `gpu_metrics
-.current_gfxclk`).
+> **Firmware warning:** this driver rewrites live SMU code and installs a tick
+> hook. A bad write can leave the SMU unresponsive and require a cold power
+> cycle.
 
-## Fix (proper 8-core handling)
-Output the **stock struct unchanged** for cores 0..5, put the magic in `Spare`,
-and append cores 6/7 in an expanded block right after `Spare`. Two manual hooks
-cap the fills; the compiled payload emits the extra cores:
+## At a glance
+
+| Item | Value |
+| --- | --- |
+| Package / module | `BC250DXEv3SMUPatchPkg` -> `MeiMeiDXEv3_SMU_Patch.efi` |
+| Depex | `gEfiVariableArchProtocolGuid AND gMeiMeiDXEv3SmuUnlockProtocolGuid` |
+| Produces | no protocol |
+| Consumes | SMU-unlock protocol, `MeiMeiDXEv3SmuPatchVar` |
+| Configuration | `MeiMeiDXEv3SmuPatchVar`, 1 byte |
+| SMU SRAM | payload at `0x3AE00`, shared lane `0x1200` bytes |
+| Compliance | [COMPLIANCE.md](COMPLIANCE.md) |
+
+## Dependencies
+
+`BC250-DXEv3-SMU-Unlock` must have opened the Q3 cluster. This driver also
+re-probes privileged access before patching and skips the work if the gate is
+closed. No other DXE driver is required.
+
+## How it works
+
+### Problem
+
+The stock metrics fill loops are count-bounded and write fixed six-entry arrays
+(`CoreFrequency[6]`, `CorePower[6]`, `CoreTemperature[6]`, `C0Residency[6]`).
+With the eight-core unlock the SMU core-count byte (`0x7AD8 + 0x1A`) is 8, so
+each loop runs eight iterations and the last two overrun the following fields.
+`C0Residency[6]` lands exactly on `Current.GfxclkFrequency`
+(`Current + 0x38 + 6*2 = Current + 0x44`), which the amdgpu driver reports as
+the GPU clock.
+
+### Fix
+
+The driver keeps the stock struct unchanged for cores 0-5, stamps a magic value
+in `Spare`, and emits cores 6/7 into an expanded block immediately after it.
+Four hooks do the work:
 
 ```
-0x29A10  A0 06        movi a13,6   cap the Average fill (FUN_00029848) at 6
-0x29BE6  A0 06        movi a13,6   cap the Current fill (FUN_00029aec) at 6
-0x29A1D  j 0x3D00C    jump into smu_patch_entry (replacing "l32r a7,0xCA54")
+0x29A0F  j smu_clamp_average    cap the Average fill at 6 (resume 0x29A12)
+0x29BE5  j smu_clamp_current    cap the Current fill at 6 (resume 0x29BE8)
+0x29A1D  j smu_patch_entry      emit the tail (replaces "l32r a7, 0xCA54")
+0x29CB8  j smu_spare_entry      stamp Current.Spare after the Current fill
 ```
 
-The payload then:
-1. writes **`Current.Spare (+0x72) = 0x67`** (magic), and
-2. mirrors the stock per-core offsets **+0x74**: `CoreFrequency2[2] +0x74`,
-   `CorePower2[2] +0x80`, `CoreTemperature2[2] +0x98`, `C0Residency2[2] +0xAC`.
+The compiled payload (`0x3AE00`, entry offset `0x28` -> `0x3AE28`):
 
-## `SmuMetrics_t` layout (driver `smu11_driver_if_cyan_skillfish.h`)
+1. writes `Current.Spare = 0x67` (`Current + 0x72`);
+2. mirrors the stock per-core offsets at `+0x74`:
+   `CoreFrequency2[2]`, `CorePower2[2]`, `CoreTemperature2[2]`,
+   `C0Residency2[2]`.
+
+The metrics base literal at `0x17F24` is relocated to `0x3B500`, so the extra
+cores land in free SRAM rather than in unrelated firmware fields.
+
+### Metrics layout
+
 ```
 SmuMetricsTable_t (0x74):   Current @ 0xCB54,   Average @ 0xCBC8
   0x00 CoreFrequency[6]   0x30 L3Frequency[2]    0x44 GfxclkFrequency
@@ -38,40 +70,54 @@ SmuMetricsTable_t (0x74):   Current @ 0xCB54,   Average @ 0xCBC8
   0x24 CoreTemperature[6] 0x38 C0Residency[6]    ...
   0x72 Spare
 ```
-`Current.Spare` = 0xCBC6, `Current.GfxclkFrequency` = 0xCB98. The expanded
-cores follow `Spare` at `0xCBC8 / 0xCBD4 / 0xCBEC / 0xCC00`.
 
-## SMU SRAM allocation (shared with the other DXEv3 SMU drivers)
-Free region `0x3AE00..0x40000`. Disjoint slices (checked, no overlaps):
+`Current.Spare` = `0xCBC6`; the expanded cores follow it at
+`0xCBC8 / 0xCBD4 / 0xCBEC / 0xCC00`.
 
-| Region             | Occupant                              |
-|--------------------|---------------------------------------|
-| `0x3AE00..0x3B9B0` | Governor payload image (2992 B)       |
-| `0x3C000..0x3C0C8` | Governor state                        |
-| `0x3C200..0x3C470` | CU-Unlock payload image (624 B)       |
-| `0x3C4C0..0x3C670` | CU-Unlock save/stack/state            |
-| `0x3D000..0x3D1C0` | **this** payload image (448 B)        |
-| `0x3D200..0x3D340` | **this** scratch (save/stack)         |
+## Configuration
 
-## Layout
-```
-payload/
-  src/smu_patch.c             extra-core emit + Spare magic (the compiled patch)
-  src/entry.S                 smu_patch_entry: tick handler, calls the C emitter
-  src/smu_patch_map.h         decoded SMU addresses (Current @0xCB54, ...)
-  build.sh                    native payload build (Xtensa)
-  src/linker.ld / Makefile
-BC250DXEv3SMUPatchPkg/        edk2 DXE driver (inject + clamps + tick-slot hook)
-BC250DXEv3SMUPatchDxe.h       SMU_PATCH_CAP_ADDR / SMU_PATCH_CAP2_ADDR / SMU_PATCH_HOOK_ADDR
-```
+- Header: `BC250-DXEv3-Shared/MeiMeiDXEv3SharedPkg/Include/Config/MeiMeiDXEv3Config.h`
+- Variable: `MEIMEIDXEV3_SMU_PATCH_VAR_NAME` (`MeiMeiDXEv3SmuPatchVar`)
+- Field: `SmuReportingPatch` at offset 0
+
+A missing, oversized, unreadable, or wrong-attribute variable means no patch and
+a normal boot.
+
+## Protocols
+
+Produces no protocol. It consumes `gMeiMeiDXEv3SmuUnlockProtocolGuid` through
+its Depex and re-probes privileged access before patching.
+
+## SMU SRAM placement
+
+Payload and scratch live in the SMU Patch lane of the canonical map:
+`0x3AE00`..`0x3C000` (`0x1200` bytes). The build pins the generated payload
+base to `MEIMEIDXEV3_SMU_PATCH_BASE` with a `STATIC_ASSERT`, bounds the image
+length by `MEIMEIDXEV3_SMU_PATCH_MAX`, and keeps the image 4-byte aligned. The
+cache-maintenance registers come from the same map. See
+[SMU_MEMORY_MAP.md](https://github.com/RescueMei/BC250-DXEv3-Shared/blob/main/docs/SMU_MEMORY_MAP.md).
+
+## Verification
+
+Every injected dword, every hooked byte, the tick-slot entry, and the metrics
+relocation literal are read back and compared. The payload region is verified
+all-zero before injection.
 
 ## Build
-```
-git submodule update --init --recursive   # DXEBUILD
-./build_ffs.sh                            # prebuild payload (Xtensa) + DXE .efi/.ffs
+
+```bash
+git submodule update --init --recursive
+./build_ffs.sh        # prebuild payload (Xtensa) + DXE .efi/.ffs
 ```
 
-## Validation (live via SMUProbe + Linux `gpu_metrics`)
-8 cores / 16 threads, 40 CUs; `pp_dpm_sclk` line 1 and `gpu_metrics`
-`current_gfxclk` = `average_gfxclk` = **350 MHz** (the governor's forced
-target) — previously the `C0Residency[6]` overflow read back as ~6.
+Output:
+
+- `Build/Output/MeiMeiDXEv3_SMU_Patch.efi`
+- `Build/Output/MeiMeiDXEv3_SMU_Patch.ffs`
+
+## Validation
+
+2026-11-24, eight-driver stack, configured ceiling 2100 MHz: `DEPLOY_OK` with
+`patch tick 0xC780 = 0x0003AE28`, actual clock 2100 MHz sustained, 82 C peak,
+0 ring timeouts, 0 C2P timeouts, and `pp_dpm_sclk` / `gpu_metrics.current_gfxclk`
+reporting the real clock. See [COMPLIANCE.md](COMPLIANCE.md).
