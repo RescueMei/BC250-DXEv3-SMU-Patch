@@ -2,6 +2,8 @@
 #define BC250DXEV3SMUPATCHDXE_H_
 
 #include <Uefi.h>
+#include <Config/MeiMeiDXEv3Config.h>
+#include <Smu/MeiMeiDXEv3SmuMap.h>
 
 //
 // Host bridge PCI configuration-space access window (SMN indirect access).
@@ -71,7 +73,7 @@
 // Enable gate: read the DXEv3 menu driver's SMU patch variable. The patch is
 // only applied when SmuReportingPatch (offset 0) is set.
 //
-#define SMU_PATCH_CONFIG_VAR_NAME        L"MeiMeiDXEv3SmuPatchVar"
+#define SMU_PATCH_CONFIG_VAR_NAME        MEIMEIDXEV3_SMU_PATCH_VAR_NAME
 #define SMU_PATCH_CONFIG_VAR_OFFSET      0U
 #define SMU_PATCH_CONFIG_ENABLED         1U
 
@@ -127,9 +129,9 @@ typedef struct {
 // live SMU code are only visible to the SMU after a d-cache + i-cache publish;
 // without it the SMU may run stale or torn instructions.
 //
-#define SMU_PATCH_CP_CB              0x000184F8U
-#define SMU_PATCH_CP_FLAG            0x0003FFBCU
-#define SMU_PATCH_CP_MASK            0x0003FFF0U
+#define SMU_PATCH_CP_CB              MEIMEIDXEV3_SMU_CACHE_CB_ADDR
+#define SMU_PATCH_CP_FLAG            MEIMEIDXEV3_SMU_CACHE_FLAG_ADDR
+#define SMU_PATCH_CP_MASK            MEIMEIDXEV3_SMU_CACHE_MASK_ADDR
 #define SMU_PATCH_CACHE_FN_DATA      0x30B3U
 #define SMU_PATCH_CACHE_FN_INSTR     0x30EBU
 #define SMU_PATCH_CACHE_MARKER       0x0EU
