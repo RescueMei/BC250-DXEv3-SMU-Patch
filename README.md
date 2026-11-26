@@ -119,7 +119,7 @@ Output:
 
 ## Validation
 
-2026-11-24, eight-driver stack, configured ceiling 2100 MHz: `DEPLOY_OK` with
+2026-11-25, nine-driver stack, configured ceiling 2100 MHz: `DEPLOY_OK` with
 `patch tick 0xC780 = 0x0003AE28`, actual clock 2100 MHz sustained, 82 C peak,
 0 ring timeouts, 0 C2P timeouts, and `pp_dpm_sclk` / `gpu_metrics.current_gfxclk`
 reporting the real clock. See [COMPLIANCE.md](COMPLIANCE.md).
