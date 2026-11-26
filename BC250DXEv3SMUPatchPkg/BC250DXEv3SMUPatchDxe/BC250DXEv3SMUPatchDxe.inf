@@ -31,6 +31,7 @@
   UefiLib
 
 [Protocols]
+  gMeiMeiDXEv3DriverInfoProtocolGuid
   gEfiLoadedImageProtocolGuid
   gEfiVariableArchProtocolGuid
   gMeiMeiDXEv3SmuUnlockProtocolGuid

@@ -85,6 +85,8 @@ a normal boot.
 
 ## Protocols
 
+Also publishes `gMeiMeiDXEv3DriverInfoProtocolGuid` with its name, version, module GUID, config schema, and payload version for the `BC250-DXEv3-Driver-Info` telemetry driver.
+
 Produces no protocol. It consumes `gMeiMeiDXEv3SmuUnlockProtocolGuid` through
 its Depex and re-probes privileged access before patching.
 

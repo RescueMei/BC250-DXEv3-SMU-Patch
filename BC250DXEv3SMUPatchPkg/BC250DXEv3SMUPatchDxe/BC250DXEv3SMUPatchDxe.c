@@ -14,6 +14,25 @@
 #include "SmuPatchMeta.h"
 
 #include <Smu/MeiMeiDXEv3SmuMap.h>
+#include <Protocol/MeiMeiDXEv3DriverInfo.h>
+
+//
+// Driver identity reported to the BC250-DXEv3-Driver-Info telemetry driver.
+//
+#define BC250_SMU_PATCH_VERSION  MEIMEIDXEV3_MAKE_VERSION (1, 0, 0)
+
+STATIC EFI_HANDLE  mDriverInfoHandle = NULL;
+
+STATIC CONST MEIMEIDXEV3_DRIVER_INFO  mDriverInfo = {
+  MEIMEIDXEV3_DRIVER_INFO_REVISION,
+  sizeof (MEIMEIDXEV3_DRIVER_INFO),
+  L"SMU-Patch",
+  BC250_SMU_PATCH_VERSION,
+  { 0x9D4E5E12, 0x3C7A, 0x4F88, { 0xA2, 0xB7, 0x0D, 0x8D, 0x6B, 0x7F, 0x2E, 0x41 } },
+  MEIMEIDXEV3_SMU_PATCH_SCHEMA,
+  1,
+  (MEIMEIDXEV3_DRIVER_CAP_CONFIG | MEIMEIDXEV3_DRIVER_CAP_PAYLOAD)
+};
 
 //
 // The generated payload header and the canonical SMU map must agree.
@@ -1033,6 +1052,22 @@ BC250DXEv3SMUPatchEntryPoint (
   VOID                  *DmaBuffer;
 
   DEBUG ((DEBUG_INFO, "BC250DXEv3SMUPatchDxe: entry\n"));
+  //
+  // Publish this driver's identity record for the telemetry driver before any
+  // early return.
+  //
+  if (mDriverInfoHandle == NULL) {
+    Status = gBS->InstallProtocolInterface (
+                    &mDriverInfoHandle,
+                    &gMeiMeiDXEv3DriverInfoProtocolGuid,
+                    EFI_NATIVE_INTERFACE,
+                    (VOID *)&mDriverInfo
+                    );
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "BC250DXEv3SMUPatchDxe: driver info install failed: %r\n", Status));
+    }
+  }
+
 
   PatchEnabled = FALSE;
   Status = GetPatchEnabled (&PatchEnabled);
